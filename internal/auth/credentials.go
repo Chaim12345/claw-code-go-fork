@@ -115,8 +115,9 @@ func GetActiveProvider() string {
 // Resolution order:
 //  1. ANTHROPIC_API_KEY env var  → provider "anthropic" / method "api_key"
 //  2. OPENAI_API_KEY env var     → provider "openai"    / method "api_key"
-//  3. Active provider in ~/.claw-code/credentials.json
-//  4. Legacy ~/.claw-code/auth.json (Anthropic OAuth from Phase 3 flows)
+//  3. DEEPSEEK_TOKEN env var     → provider "deepseek"  / method "api_key"
+//  4. Active provider in ~/.claw-code/credentials.json
+//  5. Legacy ~/.claw-code/auth.json (Anthropic OAuth from Phase 3 flows)
 func ResolveCredentials() (provider, token, method string, err error) {
 	// Env-var overrides take precedence over any stored state.
 	if key := os.Getenv("ANTHROPIC_API_KEY"); key != "" {
@@ -124,6 +125,9 @@ func ResolveCredentials() (provider, token, method string, err error) {
 	}
 	if key := os.Getenv("OPENAI_API_KEY"); key != "" {
 		return "openai", key, "api_key", nil
+	}
+	if key := os.Getenv("DEEPSEEK_TOKEN"); key != "" {
+		return "deepseek", key, "api_key", nil
 	}
 
 	// Try the credentials store.

@@ -163,6 +163,8 @@ func loadMCPServers(homeDir string) []MCPServerConfig {
 // detectProvider reads env vars to determine which provider to use.
 func detectProvider() string {
 	switch {
+	case os.Getenv("DEEPSEEK_TOKEN") != "" || os.Getenv("CLAUDE_CODE_USE_DEEPSEEK") == "1":
+		return "deepseek"
 	case os.Getenv("CLAUDE_CODE_USE_BEDROCK") == "1":
 		return "bedrock"
 	case os.Getenv("CLAUDE_CODE_USE_VERTEX") == "1":

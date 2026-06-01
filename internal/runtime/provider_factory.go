@@ -4,6 +4,7 @@ import (
 	"claw-code-go/internal/api"
 	anthropicprovider "claw-code-go/internal/api/providers/anthropic"
 	bedrockprovider "claw-code-go/internal/api/providers/bedrock"
+	deepseekprovider "claw-code-go/internal/api/providers/deepseek"
 	foundryprovider "claw-code-go/internal/api/providers/foundry"
 	openaiprovider "claw-code-go/internal/api/providers/openai"
 	vertexprovider "claw-code-go/internal/api/providers/vertex"
@@ -12,7 +13,7 @@ import (
 )
 
 // SelectProvider returns the Provider for the given name.
-// Supported names: "anthropic" (default), "openai", "bedrock", "vertex", "foundry".
+// Supported names: "anthropic" (default), "openai", "bedrock", "vertex", "foundry", "deepseek".
 func SelectProvider(name string) api.Provider {
 	switch name {
 	case "openai":
@@ -23,6 +24,8 @@ func SelectProvider(name string) api.Provider {
 		return vertexprovider.New()
 	case "foundry":
 		return foundryprovider.New()
+	case "deepseek":
+		return deepseekprovider.New()
 	default:
 		return anthropicprovider.New()
 	}
