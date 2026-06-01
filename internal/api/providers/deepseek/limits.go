@@ -38,8 +38,8 @@ func FitToBudget(text string, maxTokens int) string {
 	}
 	// Truncate at a line boundary when possible to keep the result readable.
 	cut := maxChars - 80 // leave room for the marker
-	if cut < 0 {
-		cut = 0
+	if cut <= 0 {
+		return "[... content truncated to fit context window ...]"
 	}
 	truncated := text[:cut]
 	if nl := strings.LastIndex(truncated, "\n"); nl > cut-200 && nl > 0 {

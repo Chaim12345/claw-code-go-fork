@@ -28,6 +28,12 @@ type ConversationLoop struct {
 	Compaction      CompactionState        // Phase 6 token tracking and compaction state
 	CtxAssembler    *clawctx.Assembler    // Phase 12 context assembler (may be nil)
 	Usage           *usage.Tracker        // Phase 13 per-session token usage tracker
+
+	// lastStopReason is the stop_reason reported by the most recent
+	// streaming turn ("end_turn", "tool_use", "max_tokens", …). Set
+	// by runOneTurnStreaming and read by RunTask's end_turn fast
+	// path. Zero-value when no turn has run yet.
+	lastStopReason string
 }
 
 // NewConversationLoop creates a new conversation loop with the given client.
@@ -132,24 +138,64 @@ func (loop *ConversationLoop) SendMessage(ctx context.Context, userText string) 
 		}
 	}
 
-	// Agentic loop: keep going until stop_reason is "end_turn"
+	var totalInput, totalOutput int
+
+	// Agentic loop: keep going until stop_reason is "end_turn".
+	// If the provider rejects a turn because the prompt is too large,
+	// we compact once and retry before surfacing the error. The retry
+	// budget prevents an infinite loop when compaction cannot shrink
+	// the history below the model cap.
+	const maxPromptRecoveryRetries = 1
+	promptRecoveryRetries := 0
+retryTurn:
 	for {
-		stopReason, err := loop.runOneTurn(ctx)
+		stopReason, inTok, outTok, err := loop.runOneTurn(ctx)
 		if err != nil {
+			if promptRecoveryRetries < maxPromptRecoveryRetries && isPromptTooLargeError(err) {
+				promptRecoveryRetries++
+				fmt.Fprintf(os.Stderr, "[auto-compact] prompt exceeded model cap; compacting and retrying (%d/%d)\n",
+					promptRecoveryRetries, maxPromptRecoveryRetries)
+				if _, cerr := loop.CompactNow(ctx); cerr != nil {
+					return fmt.Errorf("prompt too large and auto-compact failed: %w (original: %v)", cerr, err)
+				}
+				continue retryTurn
+			}
 			return err
 		}
+		totalInput += inTok
+		totalOutput += outTok
 
 		if stopReason != "tool_use" {
 			break
 		}
 	}
 
+	// Update compaction state with the latest token counts (Phase 6).
+	// Mirrors the bookkeeping in SendMessageStreaming (line ~344) so
+	// the CLI and live-test paths get the same accurate usage data
+	// the TUI does. Without this, LastInputTokens stays 0 forever
+	// and ShouldCompact falls back to the chars/4 estimator on
+	// every turn.
+	loop.Compaction.LastInputTokens = totalInput
+	loop.Compaction.TotalInputTokens += totalInput
+	loop.Compaction.TotalOutputTokens += totalOutput
+
+	// Update the usage tracker (Phase 13).
+	if loop.Usage != nil {
+		loop.Usage.Add(totalInput, totalOutput, 0, 0)
+	}
+
 	return nil
 }
 
 // runOneTurn sends the current session messages to the API and processes the response.
-// Returns the stop_reason.
-func (loop *ConversationLoop) runOneTurn(ctx context.Context) (string, error) {
+// Returns the stop_reason, the input-token count reported on the
+// stream's EventMessageStart, and the output-token count reported on
+// the final EventMessageDelta. The caller (SendMessage) is responsible
+// for aggregating these across the agentic loop and updating
+// loop.Compaction / loop.Usage — see SendMessageStreaming for the
+// equivalent wiring on the streaming path.
+func (loop *ConversationLoop) runOneTurn(ctx context.Context) (string, int, int, error) {
 	req := api.CreateMessageRequest{
 		Model:     loop.Config.Model,
 		MaxTokens: loop.Config.MaxTokens,
@@ -161,7 +207,7 @@ func (loop *ConversationLoop) runOneTurn(ctx context.Context) (string, error) {
 
 	ch, err := loop.Client.StreamResponse(ctx, req)
 	if err != nil {
-		return "", fmt.Errorf("stream response: %w", err)
+		return "", 0, 0, fmt.Errorf("stream response: %w", err)
 	}
 
 	// Accumulators for the current response
@@ -172,21 +218,29 @@ func (loop *ConversationLoop) runOneTurn(ctx context.Context) (string, error) {
 	}
 
 	var (
-		textBlocks    []api.ContentBlock
-		toolBlocks    []toolBlock
-		currentText   string
-		currentTool   *toolBlock
-		stopReason    string
-		blockIndex    int
-		blockTypeMap  = make(map[int]string) // index -> "text" or "tool_use"
+		textBlocks          []api.ContentBlock
+		toolBlocks          []toolBlock
+		currentText         string
+		currentTool         *toolBlock
+		stopReason          string
+		blockTypeMap        = make(map[int]string) // index -> "text" or "tool_use"
+		inputTokens         int
+		outputTokens        int
+		streamedOutputChars int // total bytes the provider emitted across text deltas + tool argument deltas; used for the outputTokens fallback
 	)
 
-	_ = blockIndex // suppress unused warning
 
 	for event := range ch {
 		switch event.Type {
 		case api.EventError:
-			return "", fmt.Errorf("stream error: %s", event.ErrorMessage)
+			return "", 0, 0, fmt.Errorf("stream error: %s", event.ErrorMessage)
+
+		case api.EventMessageStart:
+			// Provider-estimated input token count (DeepSeek web does
+			// not publish a per-request input_tokens field, so this is
+			// the client's chars/4 estimate). Captured here so the
+			// caller can pass it to ShouldCompact as ground truth.
+			inputTokens = event.InputTokens
 
 		case api.EventContentBlockStart:
 			blockTypeMap[event.Index] = event.ContentBlock.Type
@@ -203,12 +257,14 @@ func (loop *ConversationLoop) runOneTurn(ctx context.Context) (string, error) {
 			switch event.Delta.Type {
 			case "text_delta":
 				currentText += event.Delta.Text
+				streamedOutputChars += len(event.Delta.Text)
 				fmt.Fprint(os.Stdout, event.Delta.Text)
 
 			case "input_json_delta":
 				if currentTool != nil {
 					currentTool.inputBuffer += event.Delta.PartialJSON
 				}
+				streamedOutputChars += len(event.Delta.PartialJSON)
 			}
 
 		case api.EventContentBlockStop:
@@ -225,6 +281,11 @@ func (loop *ConversationLoop) runOneTurn(ctx context.Context) (string, error) {
 
 		case api.EventMessageDelta:
 			stopReason = event.StopReason
+			// Server-reported output token count (DeepSeek's
+			// accumulated_token_usage from the BATCH event, captured
+			// by the provider into EventMessageDelta.Usage). Falls
+			// back to 0 if the provider doesn't populate it.
+			outputTokens = event.Usage.OutputTokens
 
 		case api.EventMessageStop:
 			// Stream complete
@@ -239,7 +300,16 @@ func (loop *ConversationLoop) runOneTurn(ctx context.Context) (string, error) {
 	// Build the assistant message content
 	var assistantContent []api.ContentBlock
 
-	// Add text blocks first
+	// Add text blocks first, with tool-call syntax stripped so the
+	// raw `{"tool_calls":[...]}` JSON (or `<tool_calls>...</tool_calls>`
+	// XML the model sometimes emits inline) doesn't end up in the saved
+	// session. The streaming path (runOneTurnStreaming) additionally
+	// emits TurnEventTextFinal so the TUI can rewrite its in-flight
+	// buffer; this path doesn't have a buffer to rewrite, so cleanup
+	// happens only at the persistence boundary.
+	for i := range textBlocks {
+		textBlocks[i].Text = api.TrimEndOfTurnIndicator(api.StripToolCalls(textBlocks[i].Text))
+	}
 	assistantContent = append(assistantContent, textBlocks...)
 
 	// Add tool_use blocks
@@ -298,7 +368,26 @@ func (loop *ConversationLoop) runOneTurn(ctx context.Context) (string, error) {
 		})
 	}
 
-	return stopReason, nil
+	// If the provider didn't surface a server-reported output token
+	// count (DeepSeek's BATCH accumulated_token_usage is not always
+	// emitted — see live exploration), estimate from the total bytes
+	// the provider emitted across both text deltas and tool-argument
+	// deltas. The previous fallback only counted text blocks, which
+	// produced 0 output tokens for tool-only responses (the model
+	// emits raw JSON via input_json_delta with no preceding text) and
+	// shortchanged mixed responses (the text was counted, but the
+	// tool arguments that consumed the model's reasoning budget were
+	// not). streamedOutputChars is the total of every delta this
+	// loop observed, which is the closest local proxy we have to
+	// the server's true output-token count.
+	if outputTokens == 0 && streamedOutputChars > 0 {
+		outputTokens = streamedOutputChars / charsPerToken
+		if outputTokens == 0 {
+			outputTokens = 1
+		}
+	}
+
+	return stopReason, inputTokens, outputTokens, nil
 }
 
 // SendMessageStreaming sends a user message and runs the full agentic loop, emitting
@@ -327,9 +416,27 @@ func (loop *ConversationLoop) SendMessageStreaming(ctx context.Context, userText
 
 	var totalInput, totalOutput int
 
+	// Agentic loop: keep going until stop_reason is "end_turn".
+	// If the provider rejects a turn because the prompt is too large,
+	// compact once and retry before surfacing the error. Mirrors the
+	// same recovery path in SendMessage so both the TUI and
+	// autonomous (RunTask) paths benefit from it.
+	const maxStreamingPromptRecoveryRetries = 1
+	streamingPromptRecoveryRetries := 0
+streamingRetryTurn:
 	for {
 		stopReason, inTok, outTok, err := loop.runOneTurnStreaming(ctx, events)
 		if err != nil {
+			if streamingPromptRecoveryRetries < maxStreamingPromptRecoveryRetries && isPromptTooLargeError(err) {
+				streamingPromptRecoveryRetries++
+				fmt.Fprintf(os.Stderr, "[auto-compact] prompt exceeded model cap; compacting and retrying (%d/%d)\n",
+					streamingPromptRecoveryRetries, maxStreamingPromptRecoveryRetries)
+				if _, cerr := loop.CompactNow(ctx); cerr != nil {
+					events <- TurnEvent{Type: TurnEventError, Err: fmt.Errorf("prompt too large and auto-compact failed: %w (original: %v)", cerr, err)}
+					return fmt.Errorf("prompt too large and auto-compact failed: %w (original: %v)", cerr, err)
+				}
+				continue streamingRetryTurn
+			}
 			events <- TurnEvent{Type: TurnEventError, Err: err}
 			return err
 		}
@@ -384,14 +491,15 @@ func (loop *ConversationLoop) runOneTurnStreaming(ctx context.Context, events ch
 	}
 
 	var (
-		textBlocks   []api.ContentBlock
-		toolBlocks   []toolBlock
-		currentText  string
-		currentTool  *toolBlock
-		stopReason   string
-		blockTypeMap = make(map[int]string)
-		inputTokens  int
-		outputTokens int
+		textBlocks          []api.ContentBlock
+		toolBlocks          []toolBlock
+		currentText         string
+		currentTool         *toolBlock
+		stopReason          string
+		blockTypeMap        = make(map[int]string)
+		inputTokens         int
+		outputTokens        int
+		streamedOutputChars int // see runOneTurn for rationale; this path is consumed by the TUI which renders the same usage line
 	)
 
 	for event := range ch {
@@ -417,6 +525,7 @@ func (loop *ConversationLoop) runOneTurnStreaming(ctx context.Context, events ch
 			switch event.Delta.Type {
 			case "text_delta":
 				currentText += event.Delta.Text
+				streamedOutputChars += len(event.Delta.Text)
 				select {
 				case events <- TurnEvent{Type: TurnEventTextDelta, Text: event.Delta.Text}:
 				case <-ctx.Done():
@@ -426,6 +535,7 @@ func (loop *ConversationLoop) runOneTurnStreaming(ctx context.Context, events ch
 				if currentTool != nil {
 					currentTool.inputBuffer += event.Delta.PartialJSON
 				}
+				streamedOutputChars += len(event.Delta.PartialJSON)
 			}
 
 		case api.EventContentBlockStop:
@@ -438,15 +548,44 @@ func (loop *ConversationLoop) runOneTurnStreaming(ctx context.Context, events ch
 		case api.EventMessageDelta:
 			stopReason = event.StopReason
 			outputTokens = event.Usage.OutputTokens
+			loop.lastStopReason = stopReason
 
 		case api.EventMessageStop:
 			// stream complete
 		}
 	}
 
-	// Build assistant message content
+	// Build assistant message content. Strip tool-call syntax from the
+	// accumulated text so the raw JSON / XML the model sometimes emits
+	// inline (e.g. `{"tool_calls":[{"name":"bash",...}]}` or
+	// `<tool_calls>...</tool_calls>`) never lands in the saved session.
+	// Also trim the end-of-turn FINISHED sentinel the model sometimes
+	// appends as a learned stop marker.
+	for i := range textBlocks {
+		textBlocks[i].Text = api.TrimEndOfTurnIndicator(api.StripToolCalls(textBlocks[i].Text))
+	}
 	var assistantContent []api.ContentBlock
 	assistantContent = append(assistantContent, textBlocks...)
+
+	// Tell the UI to replace whatever in-flight text it has buffered
+	// with the cleaned version. Without this, the TUI commits the
+	// raw streamBuf (built from text deltas) into viewBuf on
+	// TurnEventDone, and the user sees tool-call syntax forever in
+	// their history. The TUI re-renders the assistant line in place.
+	if len(textBlocks) > 0 {
+		var joined string
+		for i, b := range textBlocks {
+			if i > 0 {
+				joined += "\n"
+			}
+			joined += b.Text
+		}
+		select {
+		case events <- TurnEvent{Type: TurnEventTextFinal, Text: joined}:
+		case <-ctx.Done():
+			return "", 0, 0, ctx.Err()
+		}
+	}
 
 	for _, tb := range toolBlocks {
 		var inputMap map[string]any
@@ -612,6 +751,19 @@ func (loop *ConversationLoop) runOneTurnStreaming(ctx context.Context, events ch
 		})
 	}
 
+	// Fallback estimate for output tokens when the provider didn't
+	// surface one (see runOneTurn for full rationale). The TUI
+	// surfaces outputTokens in the usage line at the bottom of the
+	// prompt, so a tool-only response should still report >0 tokens
+	// — otherwise the user gets a confusing "0 tokens used" right
+	// after a multi-tool turn.
+	if outputTokens == 0 && streamedOutputChars > 0 {
+		outputTokens = streamedOutputChars / charsPerToken
+		if outputTokens == 0 {
+			outputTokens = 1
+		}
+	}
+
 	return stopReason, inputTokens, outputTokens, nil
 }
 
@@ -701,6 +853,23 @@ func summarizeToolInput(input map[string]any) string {
 		}
 	}
 	return ""
+}
+
+// CompactNow forces a compaction regardless of the ShouldCompact threshold.
+// Used by the /compact command and by the auto-recovery path when the
+// provider rejects a request with a prompt-too-large error.
+func (loop *ConversationLoop) CompactNow(ctx context.Context) (string, error) {
+	if !loop.Config.CompactionEnabled {
+		return "", fmt.Errorf("compaction is disabled in config")
+	}
+	summary, err := CompactSession(ctx, loop.Client, loop.Config, loop.Session)
+	if err != nil {
+		return "", err
+	}
+	loop.Compaction.CompactionCount++
+	contMsg := GetContinuationMessage(summary)
+	loop.Session.Messages = append([]api.Message{contMsg}, loop.Session.Messages...)
+	return summary, nil
 }
 
 // ClearSession resets the conversation history in the current session.
@@ -956,4 +1125,30 @@ func (loop *ConversationLoop) MCPList() string {
 		}
 	}
 	return sb.String()
+}
+
+// promptTooLargeMarkers are substrings providers commonly use when the
+// input exceeds the model's context cap. The auto-recovery path in
+// SendMessage watches for these and triggers a compaction + retry. Keep
+// the list tight — false positives would silently compact when the real
+// issue is something else.
+var promptTooLargeMarkers = []string{
+	"prompt too large",
+	"context length exceeded",
+	"maximum context length",
+	"context_length_exceeded",
+	"input is too long",
+}
+
+func isPromptTooLargeError(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	for _, marker := range promptTooLargeMarkers {
+		if strings.Contains(msg, marker) {
+			return true
+		}
+	}
+	return false
 }

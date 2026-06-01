@@ -1,6 +1,7 @@
 package commands
 
 import (
+	"context"
 	"fmt"
 	"strings"
 )
@@ -141,6 +142,38 @@ func (r *Registry) registerBuiltins() {
 			} else {
 				fmt.Println("Cannot list sessions: incompatible loop type.")
 			}
+			return nil
+		},
+	})
+
+	r.Register(Command{
+		Name:        "compact",
+		Description: "Compact the session history to free up context space",
+		Handler: func(args string, loop interface{}) error {
+			type compactor interface {
+				CompactNow(ctx context.Context) (string, error)
+			}
+			c, ok := loop.(compactor)
+			if !ok {
+				fmt.Println("Cannot compact: incompatible loop type.")
+				return nil
+			}
+			// Use a background context for manual compaction; the REPL
+			// does not have a request-scoped context here. The provider
+			// stream respects its own timeout.
+			summary, err := c.CompactNow(context.Background())
+			if err != nil {
+				return fmt.Errorf("compact: %w", err)
+			}
+			if summary == "" {
+				fmt.Println("Nothing to compact (session is empty).")
+				return nil
+			}
+			preview := summary
+			if len(preview) > 200 {
+				preview = preview[:200] + "…"
+			}
+			fmt.Printf("Compacted session. Summary preview: %s\n", preview)
 			return nil
 		},
 	})

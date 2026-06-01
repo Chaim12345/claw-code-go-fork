@@ -6,8 +6,14 @@ type StreamEvent struct {
 	Data  string
 }
 
-// StreamHandler is the callback for each StreamEvent.
-type StreamHandler func(event StreamEvent)
+// StreamHandler is the callback for each StreamEvent. Return false to
+// stop the stream: parseSSE will not invoke the handler again and
+// ChatCompletionStream will return normally. The provider layer uses
+// this to abort further reads as soon as the server's quasi_status
+// FINISHED event arrives, instead of waiting for stream EOF (which
+// can be delayed by keep-alive traffic) and instead of stripping a
+// literal "FINISHED" suffix from content deltas.
+type StreamHandler func(event StreamEvent) bool
 
 // SettingsLimits is the per-variant limit info we may pass through to
 // ChatCompletionStream. The web API publishes the actual limits on

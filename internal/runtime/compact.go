@@ -47,6 +47,13 @@ func EstimateTokens(messages []api.Message) int {
 // ShouldCompact returns true when the session should be compacted.
 // It uses the actual API-reported input token count when available (> 0),
 // falling back to EstimateTokens.
+//
+// The threshold is computed against cfg.CompactionMaxInputTokens when set,
+// otherwise against cfg.MaxTokens. Providers with very large context
+// windows (e.g. DeepSeek's web API caps at 655k tokens for Instant) MUST
+// populate CompactionMaxInputTokens so we don't compact based on the
+// per-turn MaxTokens budget, which is meant for output budgeting not
+// context.
 func ShouldCompact(inputTokens int, messages []api.Message, cfg *Config) bool {
 	if !cfg.CompactionEnabled {
 		return false
@@ -54,7 +61,11 @@ func ShouldCompact(inputTokens int, messages []api.Message, cfg *Config) bool {
 	if inputTokens <= 0 {
 		inputTokens = EstimateTokens(messages)
 	}
-	threshold := int(float64(cfg.MaxTokens) * cfg.CompactionThreshold)
+	basis := cfg.CompactionMaxInputTokens
+	if basis <= 0 {
+		basis = cfg.MaxTokens
+	}
+	threshold := int(float64(basis) * cfg.CompactionThreshold)
 	return inputTokens >= threshold
 }
 

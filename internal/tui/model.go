@@ -83,6 +83,7 @@ const (
 // Bubble Tea messages for async streaming events.
 type (
 	streamDeltaMsg    struct{ text string }
+	streamTextFinalMsg struct{ text string }
 	streamToolMsg     struct{ name, input string }
 	streamToolDoneMsg struct{ name, result string }
 	streamUsageMsg    struct{ inputTokens, outputTokens int }
@@ -127,6 +128,23 @@ type Model struct {
 	// content buffers
 	viewBuf   string // finalized history (all complete turns)
 	streamBuf string // in-progress streaming content
+
+	// streamTextLen is the byte length of streamBuf at the moment
+	// the first non-text event (tool running, tool done) is
+	// appended. It marks the boundary between the assistant's text
+	// (which may contain raw tool-call syntax that gets stripped
+	// post-hoc) and the tool indicators. When streamTextFinalMsg
+	// arrives with the cleaned text, we replace just the
+	// [0:streamTextLen) prefix and leave the suffix (tool
+	// indicators) intact. Without this, TextFinal would clobber
+	// the tool indicators and the user would see the tool calls
+	// vanish with no feedback.
+	streamTextLen int
+
+	// streamTextRendered is set when streamTextFinalMsg renders the
+	// text portion through glamour. When true, streamDoneMsg skips
+	// the RenderMarkdown call to avoid double-rendering ANSI output.
+	streamTextRendered bool
 
 	// token counts for status bar
 	inputTokens  int
@@ -213,13 +231,56 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if !m.hasStreamContent {
 			m.hasStreamContent = true
 		}
+		// Each new turn starts fresh — the previous turn's text
+		// boundary is meaningless once streamBuf has been
+		// committed to viewBuf (on streamDoneMsg). Defensively
+		// reset here too in case the orchestrator forgot.
+		m.streamTextLen = 0
+		m.streamTextRendered = false
 		m.streamBuf += msg.text
+		m = m.refreshViewport()
+		return m, waitForStream(m.streamChan)
+
+	case streamTextFinalMsg:
+		// Conversation loop has finished accumulating the turn
+		// and stripped tool-call syntax from the text. Replace
+		// only the text portion of streamBuf (the prefix before
+		// any tool indicators) so the upcoming commit (on
+		// streamDoneMsg) writes a tool-call-free line AND the
+		// tool running/done indicators the user already saw
+		// stay on screen. If no tool events happened during
+		// this turn, streamTextLen is 0 and the prefix
+		// replacement degenerates to a full overwrite.
+		prefix := msg.text
+		// Render the cleaned text through glamour immediately so
+		// the user sees formatted markdown (bold, code, etc.)
+		// instead of raw asterisks/backticks. The tool indicators
+		// after the text boundary are already ANSI-styled, so
+		// they must NOT go through glamour.
+		if looksLikeMarkdown(prefix) {
+			prefix = RenderMarkdown(prefix, m.width)
+		}
+		m.streamTextRendered = true
+		if m.streamTextLen > 0 && m.streamTextLen <= len(m.streamBuf) {
+			m.streamBuf = prefix + m.streamBuf[m.streamTextLen:]
+		} else {
+			m.streamBuf = prefix
+		}
+		if msg.text != "" {
+			m.hasStreamContent = true
+		}
 		m = m.refreshViewport()
 		return m, waitForStream(m.streamChan)
 
 	case streamToolMsg:
 		if !m.hasStreamContent {
 			m.hasStreamContent = true
+		}
+		// First tool event after the text deltas — freeze the
+		// text boundary so streamTextFinalMsg can replace just
+		// the text portion without clobbering the indicators.
+		if m.streamTextLen == 0 {
+			m.streamTextLen = len(m.streamBuf)
 		}
 		line := toolRunningStyle.Render(fmt.Sprintf("  ◆ %s: %s\n", msg.name, truncate(msg.input, 60)))
 		m.streamBuf += line
@@ -244,16 +305,27 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case streamDoneMsg:
 		// Commit streamBuf to viewBuf with token annotation.
 		if m.streamBuf != "" || m.hasStreamContent {
+			// If the text was already rendered through glamour
+			// (on streamTextFinalMsg), don't double-render —
+			// glamour would mangle ANSI escape codes. If there
+			// was no TextFinal event (e.g. tool-only turns),
+			// the raw text still needs rendering.
+			rendered := m.streamBuf
+			if !m.streamTextRendered && looksLikeMarkdown(rendered) {
+				rendered = RenderMarkdown(rendered, m.width)
+			}
 			tokLine := statusStyle.Render(fmt.Sprintf(
 				"\n\nTokens: %s in / %s out\n\n",
 				formatNum(m.inputTokens),
 				formatNum(m.outputTokens),
 			))
-			m.viewBuf += m.streamBuf + tokLine
-			m.streamBuf = ""
-		}
-		m.hasStreamContent = false
-		m.state = stateInput
+			m.viewBuf += rendered + tokLine
+	m.streamBuf = ""
+	}
+	m.hasStreamContent = false
+	m.streamTextLen = 0
+	m.streamTextRendered = false
+	m.state = stateInput
 		m = m.refreshViewport()
 		m.viewport.GotoBottom()
 		return m, nil
@@ -437,6 +509,22 @@ func (m Model) handleSlashCommand(cmd string) (tea.Model, tea.Cmd) {
 		m.streamBuf = ""
 		m.inputTokens = 0
 		m.outputTokens = 0
+		m = m.refreshViewport()
+		return m, nil
+
+	case "/compact":
+		summary, err := m.loop.CompactNow(context.Background())
+		if err != nil {
+			m.viewBuf += errorStyle.Render(fmt.Sprintf("Compact failed: %v\n\n", err))
+		} else if summary == "" {
+			m.viewBuf += statusStyle.Render("Nothing to compact (session is empty).\n\n")
+		} else {
+			preview := summary
+			if len(preview) > 200 {
+				preview = preview[:200] + "…"
+			}
+			m.viewBuf += statusStyle.Render(fmt.Sprintf("Compacted session. Summary preview: %s\n\n", preview))
+		}
 		m = m.refreshViewport()
 		return m, nil
 
@@ -996,7 +1084,7 @@ func (m Model) viewAskUser() string {
 
 // startMessage begins a streaming conversation turn.
 func (m Model) startMessage(text string) (tea.Model, tea.Cmd) {
-	m.viewBuf += userLabelStyle.Render("You") + ": " + text + "\n\n"
+	m.viewBuf += RenderUserMarkdown(text, m.width) + "\n"
 	m.viewBuf += assistantLabelStyle.Render("Claude") + ": "
 	m.state = stateBusy
 	m.hasStreamContent = false
@@ -1346,6 +1434,14 @@ func waitForStream(ch <-chan runtime.TurnEvent) tea.Cmd {
 			switch ev.Type {
 			case runtime.TurnEventTextDelta:
 				return streamDeltaMsg{text: ev.Text}
+			case runtime.TurnEventTextFinal:
+				// Conversation loop has finished accumulating the
+				// turn and stripped tool-call syntax. Replace
+				// whatever raw text the deltas left in the
+				// streamBuf with the cleaned version so the
+				// commit (on streamDoneMsg) writes a
+				// tool-call-free line into viewBuf.
+				return streamTextFinalMsg{text: ev.Text}
 			case runtime.TurnEventToolStart:
 				return streamToolMsg{name: ev.ToolName, input: ev.ToolInput}
 			case runtime.TurnEventToolDone:

@@ -19,7 +19,7 @@ func ParsePermissionMode(s string) (PermissionMode, error) {
 		return ModeDefault, nil
 	case "accept-edits":
 		return ModeAcceptEdits, nil
-	case "bypass":
+	case "bypass", "auto":
 		return ModeBypassPermissions, nil
 	case "plan":
 		return ModePlan, nil

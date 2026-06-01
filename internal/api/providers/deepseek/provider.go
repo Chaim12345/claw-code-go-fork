@@ -39,10 +39,13 @@ func (p *Provider) NewClient(cfg api.ProviderConfig) (api.APIClient, error) {
 		model = DefaultModel
 	}
 	_ = cfg.BaseURL
+	wc := NewWebClient(token)
+	if cfg.BaseURL != "" {
+		wc.BaseURL = cfg.BaseURL
+	}
 	return &Client{
-		token: token,
 		model: model,
-		web:   NewWebClient(token),
+		web:   wc,
 	}, nil
 }
 
@@ -53,7 +56,6 @@ const DefaultModel = "expert"
 // tools) into the web chat session format, and re-emits the streamed chunks
 // as api.StreamEvent values compatible with the conversation loop.
 type Client struct {
-	token string
 	model string
 	web   *WebClient
 
@@ -128,13 +130,11 @@ var transientErrors = []string{
 	"connection refused",
 	"EOF",
 	"timeout",
-	"EOF",
 	"PoW",
 	"500",
 	"502",
 	"503",
 	"504",
-	"rate limit",
 	"temporarily unavailable",
 	"stream error",
 	"no session ID",
@@ -200,13 +200,12 @@ func (c *Client) StreamResponse(ctx context.Context, req api.CreateMessageReques
 
 	c.mu.Lock()
 	parentID := c.parentMessageID
+	sessID := c.chatSessionID
 	c.mu.Unlock()
 	var parentPtr *string
 	if parentID != "" {
 		parentPtr = &parentID
 	}
-
-	sessID := c.chatSessionID
 
 	ch := make(chan api.StreamEvent, 64)
 
@@ -218,7 +217,7 @@ func (c *Client) StreamResponse(ctx context.Context, req api.CreateMessageReques
 			case ch <- ev:
 				return true
 			case <-ctx.Done():
-				return false
+				return true
 			}
 		}
 
@@ -236,9 +235,25 @@ func (c *Client) StreamResponse(ctx context.Context, req api.CreateMessageReques
 		var fullText strings.Builder
 		// Track output tokens for the EventMessageDelta Usage field.
 		var outputChars int
+		// Track the server-reported *output* token count from
+		// accumulated_token_usage BATCH events (live-mapped in
+		// TestLiveDumpRawSSE). This is the real number the DeepSeek
+		// server saw for the response — we surface it on
+		// EventMessageDelta so the conversation loop's usage tracker
+		// and cost estimator get accurate data instead of the local
+		// chars/4 guess.
+		var serverOutputTokens int
 		// Hit the budget? Stop accepting new content but keep the goroutine
 		// running so we can still emit tool-call blocks and the final events.
 		var budgetExceeded bool
+		// sawFinishedStatus records whether the server's authoritative
+		// FINISHED event arrived. When set, a trailing "FINISHED" token
+		// in the model's own text is a sentinel artefact (the model
+		// learned to emit it as an end-of-turn marker) and we can trim
+		// it without risking a false positive on the English word
+		// "FINISHED" in legitimate prose. Without the SSE signal we
+		// can't distinguish the two cases and the trim stays off.
+		var sawFinishedStatus bool
 
 		// Open a text content block for the streamed response.
 		if !send(api.StreamEvent{
@@ -271,6 +286,7 @@ func (c *Client) StreamResponse(ctx context.Context, req api.CreateMessageReques
 				// the next attempt's tool detection.
 				fullText.Reset()
 				outputChars = 0
+				serverOutputTokens = 0
 				budgetExceeded = false
 			}
 
@@ -281,14 +297,46 @@ func (c *Client) StreamResponse(ctx context.Context, req api.CreateMessageReques
 					Prompt:      prompt,
 					Spec:        spec,
 				},
-				func(event StreamEvent) {
+				func(event StreamEvent) bool {
 				if event.Event != "content" {
 					if event.Event == "message_id" {
 						c.mu.Lock()
 						c.parentMessageID = event.Data
 						c.mu.Unlock()
+						return true
 					}
-					return
+					if event.Event == "usage" {
+						// Server-reported output token count for this
+						// message. Parsed from the BATCH update frame
+						// {"p":"response","o":"BATCH","v":[{"p":
+						//   "accumulated_token_usage","v":N}, ...]}.
+						var n int
+						fmt.Sscanf(event.Data, "%d", &n)
+						if n > 0 {
+							serverOutputTokens = n
+						}
+						return true
+					}
+					if event.Event == "status" && event.Data == "FINISHED" {
+						// The server has signalled that the turn is
+						// complete. parseSSE will not invoke this
+						// handler again. We keep what we already
+						// accumulated in fullText; the model
+						// frequently echoes a literal "FINISHED"
+						// token as a training-time end-of-turn
+						// marker inside its content stream. We
+						// remember that the SSE event fired so the
+						// post-stream cleanup below can trim that
+						// sentinel safely (without this guard we
+						// would risk clipping legitimate English
+						// prose that happens to end with the word
+						// "FINISHED").
+						sawFinishedStatus = true
+						return true
+					}
+					// "debug" lines and any unknown status values
+					// are ignored — keep reading.
+					return true
 				}
 				// Always append to fullText — even after the budget trips —
 				// so tool-call detection can still see what the model tried
@@ -297,7 +345,7 @@ func (c *Client) StreamResponse(ctx context.Context, req api.CreateMessageReques
 				fullText.WriteString(event.Data)
 				outputChars += len(event.Data)
 				if budgetExceeded {
-					return
+					return true
 				}
 				if outputChars > maxOutputChars {
 					// We've hit the output budget. Note it for later and
@@ -305,15 +353,16 @@ func (c *Client) StreamResponse(ctx context.Context, req api.CreateMessageReques
 					// response in fullText so tool detection still works.
 					budgetExceeded = true
 					fmt.Fprintf(os.Stderr, "[deepseek] output budget exhausted at %d chars; truncating stream\n", outputChars)
-					return
+					return true
 				}
 					if !send(api.StreamEvent{
 						Type:  api.EventContentBlockDelta,
 						Index: 0,
 						Delta: api.Delta{Type: "text_delta", Text: event.Data},
 					}) {
-						return
+						return true
 					}
+					return true
 				},
 			)
 
@@ -341,6 +390,9 @@ func (c *Client) StreamResponse(ctx context.Context, req api.CreateMessageReques
 		// If we hit the output budget mid-tool-call, append a marker so the
 		// model (next turn) understands the previous turn was cut short.
 		text := fullText.String()
+		if sawFinishedStatus {
+			text = trimFinishedSentinel(text)
+		}
 		if budgetExceeded && !strings.HasSuffix(strings.TrimSpace(text), "…") {
 			text += "\n\n[…response truncated by client to fit max_tokens…]"
 		}
@@ -386,9 +438,19 @@ func (c *Client) StreamResponse(ctx context.Context, req api.CreateMessageReques
 		if len(calls) > 0 {
 			stopReason = "tool_use"
 		}
+		// Surface the real server-reported output token count (or our
+		// local chars/4 estimate as a fallback) on the message_delta
+		// event. The conversation loop reads
+		// event.Usage.OutputTokens to update the usage tracker and
+		// the per-turn cost estimate.
+		outTokens := serverOutputTokens
+		if outTokens == 0 {
+			outTokens = EstimateTokens(fullText.String())
+		}
 		send(api.StreamEvent{
 			Type:       api.EventMessageDelta,
 			StopReason: stopReason,
+			Usage:      api.UsageDelta{OutputTokens: outTokens},
 		})
 		send(api.StreamEvent{Type: api.EventMessageStop})
 	}()
@@ -396,16 +458,44 @@ func (c *Client) StreamResponse(ctx context.Context, req api.CreateMessageReques
 	return ch, nil
 }
 
-func (c *Client) modelType() string {
-	// Legacy shim used by the original dpp harness. We keep it so callers
-	// that pass a raw model_type string ("default" / "expert") still work.
-	switch c.model {
-	case "deepseek-reasoner", "deepseek-r1", "reasoner", "expert":
-		return "expert"
-	case "vision":
-		return "vision"
+// trimFinishedSentinel removes a trailing "FINISHED" token that the
+// model emits as a learned end-of-turn marker. It only runs when
+// the caller has already confirmed the SSE FINISHED event fired
+// (otherwise we can't tell the sentinel from the English word).
+//
+// In practice, on chat.deepseek.com the model splices the sentinel
+// directly onto the last word of its response ("...layers.FINISHED")
+// or emits it on its own line ("...\n\nFINISHED"). The English
+// word "FINISHED" at the end of a code-session turn is rare enough
+// that we accept the false positive in exchange for the UX win of
+// a clean response. Callers that need to distinguish the two
+// should check the SSE FINISHED signal themselves (this function
+// assumes it already fired).
+//
+// When the sentinel follows a sentence-boundary punctuation
+// (`.`, `!`, `?`) we also strip that punctuation, because the model
+// emits it only to fake a "sentence end" before the sentinel —
+// a real English sentence ending in "FINISHED" would not have a
+// period after the word ("the build is FINISHED" without period is
+// already a valid stylization).
+func trimFinishedSentinel(text string) string {
+	const sentinel = "FINISHED"
+	trimmed := strings.TrimRight(text, " \t\r\n")
+	if !strings.HasSuffix(trimmed, sentinel) {
+		return text
 	}
-	return "default"
+	cut := len(trimmed) - len(sentinel)
+	// If the char immediately before "FINISHED" is a
+	// sentence-boundary punctuation the model added to fake a
+	// sentence end, also strip it ("...layers.FINISHED" →
+	// "...layers", not "...layers.").
+	if cut > 0 {
+		switch trimmed[cut-1] {
+		case '.', '!', '?':
+			cut--
+		}
+	}
+	return strings.TrimRight(trimmed[:cut], " \t\r\n")
 }
 
 // buildPrompt flattens an Anthropic-style request into the single-prompt
@@ -463,7 +553,7 @@ func buildPrompt(system string, messages []api.Message, tools []api.Tool) string
 		}
 	}
 
-	parts = append(parts, "\nRespond with the next assistant turn. To call a tool, output a JSON object like {\"tool_calls\":[{\"name\":\"...\",\"arguments\":{...}}]} on its own line (no markdown fences).")
+	parts = append(parts, "\nRespond with the next assistant turn. To call a tool, output a JSON object like {\"tool_calls\":[{\"name\":\"...\",\"arguments\":{...}}]} on its own line, or use XML: <tool_calls><invoke name=\"tool_name\"><parameter name=\"arg\">value</parameter></invoke></tool_calls>.")
 
 	return strings.Join(parts, "\n\n")
 }
@@ -483,10 +573,9 @@ func describeTools(tools []api.Tool) string {
 		return ""
 	}
 	var lines []string
-	lines = append(lines, "Available tools (output as JSON: {\"tool_calls\":[{\"name\":...,\"arguments\":{...}}]}):")
+	lines = append(lines, "Available tools (output as JSON {\"tool_calls\":[{\"name\":...,\"arguments\":{...}}]} or XML <tool_calls><invoke name=\"...\"><parameter name=\"...\">...</parameter></invoke></tool_calls>):")
 	for _, t := range tools {
 		lines = append(lines, fmt.Sprintf("- %s: %s", t.Name, t.Description))
-		var props []string
 		required := map[string]bool{}
 		for _, r := range t.InputSchema.Required {
 			required[r] = true
@@ -498,7 +587,6 @@ func describeTools(tools []api.Tool) string {
 			}
 			lines = append(lines, fmt.Sprintf("    - %s [%s]%s: %s", k, p.Type, req, p.Description))
 		}
-		_ = props
 	}
 	return strings.Join(lines, "\n")
 }

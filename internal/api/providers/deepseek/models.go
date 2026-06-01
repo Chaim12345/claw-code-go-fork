@@ -164,14 +164,17 @@ func (wc *WebClient) FetchModelSettings() (map[string]ModelConfig, error) {
 	}
 	defer resp.Body.Close()
 
+	// Read the body once, then decode from the buffer. The full response
+	// is huge (the Instant config has a 7KB file_feature listing every
+	// supported file extension) so we trim aggressively.
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("settings read: %w", err)
+	}
 	if resp.StatusCode != 200 {
-		body, _ := io.ReadAll(resp.Body)
 		return nil, fmt.Errorf("settings status %d: %s", resp.StatusCode, string(body))
 	}
 
-	// Parse just enough to find the model_configs array. The full response
-	// is huge (the Instant config has a 7KB file_feature listing every
-	// supported file extension) so we trim aggressively.
 	var probe struct {
 		Data struct {
 			BizData struct {
@@ -183,7 +186,7 @@ func (wc *WebClient) FetchModelSettings() (map[string]ModelConfig, error) {
 			} `json:"biz_data"`
 		} `json:"data"`
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&probe); err != nil {
+	if err := json.Unmarshal(body, &probe); err != nil {
 		return nil, fmt.Errorf("settings parse: %w", err)
 	}
 

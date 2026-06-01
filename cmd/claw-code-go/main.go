@@ -38,6 +38,7 @@ func main() {
 
 	promptFlag := flag.String("prompt", "", "Run a single prompt and exit")
 	modelFlag := flag.String("model", "", "Override the model to use")
+	providerFlag := flag.String("provider", "", "AI provider: anthropic, openai, bedrock, vertex, foundry, deepseek (default: detected from env)")
 	replFlag := flag.Bool("repl", false, "Run in interactive REPL mode (default when no --prompt)")
 	sessionFlag := flag.String("session", "", "Session ID to load")
 	sessionDirFlag := flag.String("session-dir", "", "Directory to store sessions")
@@ -69,6 +70,9 @@ func main() {
 
 	if *modelFlag != "" {
 		cfg.Model = *modelFlag
+	}
+	if *providerFlag != "" {
+		cfg.ProviderName = *providerFlag
 	}
 	if *sessionDirFlag != "" {
 		cfg.SessionDir = *sessionDirFlag

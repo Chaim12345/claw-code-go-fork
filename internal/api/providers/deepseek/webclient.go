@@ -120,7 +120,7 @@ func (wc *WebClient) buildBaseHeaders() http.Header {
 	h.Set("x-app-version", appVersion)
 	h.Set("x-client-locale", "en_US")
 	h.Set("x-client-platform", "web")
-	h.Set("x-client-timezone-offset", "10800")
+	h.Set("x-client-timezone-offset", timezoneOffset())
 	h.Set("x-client-version", clientVersion)
 	h.Set("sec-fetch-dest", "empty")
 	h.Set("sec-fetch-mode", "cors")
@@ -253,6 +253,14 @@ func generateClientStreamID() string {
 	return fmt.Sprintf("%04d%02d%02d-%x", now.Year(), now.Month(), now.Day(), b)
 }
 
+// timezoneOffset returns the local timezone offset in seconds, formatted as
+// a string (e.g. "10800" for UTC+3). DeepSeek's web API includes this
+// header for session fingerprinting.
+func timezoneOffset() string {
+	_, offset := time.Now().Zone()
+	return fmt.Sprintf("%d", offset)
+}
+
 // ChatCompletionStream sends a streaming completion request and invokes the
 // handler for each parsed event. The responseMessageID is captured for the
 // caller to chain follow-up requests.
@@ -317,14 +325,15 @@ func (wc *WebClient) ChatCompletionStream(opts CompletionOpts, handler StreamHan
 	}
 
 	var lastID string
-	parseSSE(resp.Body, func(event StreamEvent) {
+	parseSSE(resp.Body, func(event StreamEvent) bool {
 		if event.Event == "content" {
-			handler(event)
+			return handler(event)
 		} else if event.Event == "debug" {
 			fmt.Fprintf(os.Stderr, "[DEBUG] %s\n", event.Data)
 		} else if event.Event == "message_id" {
 			lastID = event.Data
 		}
+		return true
 	})
 
 	return lastID, nil
@@ -344,17 +353,65 @@ func parseSSE(r io.Reader, handler StreamHandler) {
 			break
 		}
 
-		// Try to capture response_message_id from any data line.
+		// Try to capture response_message_id from any data line. The
+		// first data frame looks like
+		//   {"request_message_id":1,"response_message_id":2,"model_type":"default"}
+		// — see TestLiveDumpRawSSE for the full surface.
 		var probe map[string]interface{}
 		if json.Unmarshal([]byte(data), &probe) == nil {
 			if rid, ok := probe["response_message_id"].(float64); ok {
-				handler(StreamEvent{Event: "message_id", Data: fmt.Sprintf("%.0f", rid)})
+				if !handler(StreamEvent{Event: "message_id", Data: fmt.Sprintf("%.0f", rid)}) {
+					return
+				}
+			}
+			// BATCH update frames look like
+			//   {"p":"response","o":"BATCH","v":[
+			//      {"p":"accumulated_token_usage","v":55},
+			//      {"p":"quasi_status","v":"FINISHED"}
+			//   ]}
+			// accumulated_token_usage is the server-reported *output* token
+			// count for this message — we surface it so the conversation
+			// loop's usage tracker gets real numbers, not local estimates.
+			// quasi_status=FINISHED is the server's authoritative "done"
+			// signal (independent of stream EOF). When the provider sees
+			// it, it returns false from the handler to stop parseSSE
+			// from reading further — this is how we end the stream
+			// cleanly without a brittle literal-suffix strip on the
+			// content deltas.
+			if p, _ := probe["p"].(string); p == "response" && probe["o"] == "BATCH" {
+				if arr, ok := probe["v"].([]interface{}); ok {
+					for _, item := range arr {
+						m, ok := item.(map[string]interface{})
+						if !ok {
+							continue
+						}
+						switch m["p"] {
+						case "accumulated_token_usage":
+							if n, ok := m["v"].(float64); ok {
+								if !handler(StreamEvent{Event: "usage", Data: fmt.Sprintf("%.0f", n)}) {
+									return
+								}
+							}
+						case "quasi_status":
+							if s, ok := m["v"].(string); ok {
+								if !handler(StreamEvent{Event: "status", Data: s}) {
+									return
+								}
+							}
+						}
+					}
+				}
 			}
 		}
 
 		if content := parseDeepSeekSseData(data); content != "" {
-			handler(StreamEvent{Event: "content", Data: content})
+			if !handler(StreamEvent{Event: "content", Data: content}) {
+				return
+			}
 		}
+	}
+	if err := scanner.Err(); err != nil {
+		fmt.Fprintf(os.Stderr, "[deepseek] SSE scanner error: %v\n", err)
 	}
 }
 

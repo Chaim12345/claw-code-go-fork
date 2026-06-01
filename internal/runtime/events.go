@@ -5,6 +5,7 @@ type TurnEventType int
 
 const (
 	TurnEventTextDelta     TurnEventType = iota // streaming text chunk
+	TurnEventTextFinal                          // final cleaned assistant text (after tool-call stripping); replace any in-progress buffer with this
 	TurnEventToolStart                          // tool execution starting
 	TurnEventToolDone                           // tool execution complete
 	TurnEventUsage                              // token usage update
