@@ -8,60 +8,38 @@
   'use strict';
 
   // ── DOM refs ──────────────────────────────────────────────
-  const composer     = document.getElementById('composer');
-  const composerInput = document.getElementById('composer-input');
-  const sendButton   = document.getElementById('send-button');
-  const messagesEl   = document.getElementById('messages');
-  const statusPill   = document.getElementById('connection-status');
-  const sidebarToggle = document.getElementById('sidebar-toggle');
-  const sidebar       = document.getElementById('sidebar');
+  var composer       = document.getElementById('composer');
+  var composerInput  = document.getElementById('composer-input');
+  var sendButton     = document.getElementById('send-button');
+  var messagesEl     = document.getElementById('messages');
+  var statusPill     = document.getElementById('connection-status');
+  var sidebarToggle  = document.getElementById('sidebar-toggle');
+  var sidebar        = document.getElementById('sidebar');
 
   // ── State ─────────────────────────────────────────────────
-  let ws = null;
-  let reconnectTimer = null;
-  let reconnectDelay = 1000;
-  const MAX_RECONNECT_DELAY = 30000;
+  var ws = null;
+  var reconnectTimer = null;
+  var reconnectDelay = 1000;
+  var MAX_RECONNECT_DELAY = 30000;
+  var currentBubble = null;   // current assistant bubble for deltas
+  var currentBubbleContent = ''; // accumulated markdown content
 
   // ── Visual Viewport (virtual keyboard) handling ───────────
-  /**
-   * On mobile, the visualViewport API fires 'resize' when the
-   * virtual keyboard appears or disappears. We adjust the
-   * composer position and scroll messages to the bottom so
-   * the user can see the latest content above the keyboard.
-   */
   function handleViewportResize() {
     if (!window.visualViewport) return;
-
     var viewport = window.visualViewport;
     var keyboardHeight = window.innerHeight - viewport.height;
-
-    // Adjust the composer bottom padding so it sits above
-    // the virtual keyboard. The --keyboard-offset custom
-    // property can be read by CSS if needed, but here we
-    // directly scroll to ensure the last message is visible.
     if (keyboardHeight > 100) {
-      // Keyboard is likely visible
       composer.style.paddingBottom = (keyboardHeight + 8) + 'px';
       scrollToBottom();
     } else {
-      // Keyboard hidden — reset to safe-area default
       composer.style.paddingBottom = '';
     }
-
-    // If the viewport is offset (iOS Safari scrolls the page
-    // when the keyboard opens), we compensate by adjusting
-    // the messages scroll position.
     if (viewport.offsetTop > 0) {
       messagesEl.scrollTop += viewport.offsetTop;
     }
   }
 
-  /**
-   * Sets up virtual keyboard detection via visualViewport API.
-   * This is the primary mechanism for handling mobile keyboards.
-   * Falls back gracefully on desktop where visualViewport is
-   * either absent or matches window.innerHeight exactly.
-   */
   function setupKeyboardHandling() {
     if (window.visualViewport) {
       window.visualViewport.addEventListener('resize', handleViewportResize);
@@ -71,19 +49,12 @@
 
   // ── Composer auto-grow ────────────────────────────────────
   composerInput.addEventListener('input', function () {
-    // Auto-grow the textarea up to 8 rows
     this.style.height = 'auto';
     var lineHeight = parseFloat(getComputedStyle(this).lineHeight) || 24;
     var maxHeight = lineHeight * 8;
     this.style.height = Math.min(this.scrollHeight, maxHeight) + 'px';
-
-    // Enable/disable send button based on content
     sendButton.disabled = this.value.trim().length === 0;
-
-    // Adjust viewport on mobile after resize
-    if (window.visualViewport) {
-      handleViewportResize();
-    }
+    if (window.visualViewport) handleViewportResize();
   });
 
   // ── Form submit ───────────────────────────────────────────
@@ -91,14 +62,8 @@
     e.preventDefault();
     var text = composerInput.value.trim();
     if (!text || !ws || ws.readyState !== WebSocket.OPEN) return;
-
-    // Send user input over WebSocket
     ws.send(JSON.stringify({ type: 'user_input', text: text }));
-
-    // Render user message
-    appendMessage('user', text);
-
-    // Clear input and reset height
+    appendMessage('user', escapeHtml(text));
     composerInput.value = '';
     composerInput.style.height = '';
     sendButton.disabled = true;
@@ -106,13 +71,66 @@
     scrollToBottom();
   });
 
-  // ── Message rendering ─────────────────────────────────────
-  function appendMessage(role, text) {
-    var div = document.createElement('div');
-    div.className = 'message message-' + role;
-    div.textContent = text;
-    messagesEl.appendChild(div);
+  // ── Message rendering with delta grouping ─────────────────
+  function appendMessage(role, html) {
+    var wrapper = document.createElement('div');
+    wrapper.className = 'message message-' + role;
+    wrapper.innerHTML = html;
+    messagesEl.appendChild(wrapper);
     scrollToBottom();
+  }
+
+  function startAssistantBubble() {
+    currentBubble = document.createElement('div');
+    currentBubble.className = 'message message-assistant';
+    currentBubbleContent = '';
+    messagesEl.appendChild(currentBubble);
+  }
+
+  function appendDelta(text) {
+    if (!currentBubble) startAssistantBubble();
+    currentBubbleContent += text;
+    currentBubble.innerHTML = renderMarkdown(currentBubbleContent);
+    scrollToBottom();
+  }
+
+  function finalizeAssistantBubble() {
+    if (currentBubble) {
+      currentBubble.innerHTML = renderMarkdown(currentBubbleContent);
+      currentBubble = null;
+      currentBubbleContent = '';
+    }
+  }
+
+  /**
+   * Simple markdown-aware renderer: handles code blocks and
+   * inline code. Falls back to escaped HTML for everything else.
+   */
+  function renderMarkdown(text) {
+    // Protect against XSS by escaping HTML first
+    var escaped = escapeHtml(text);
+
+    // Replace code blocks: ```lang\n...\n```
+    escaped = escaped.replace(/```(\w+)?\n([\s\S]*?)```/g, function (match, lang, code) {
+      var langClass = lang ? ' class="language-' + lang + '"' : '';
+      return '<pre><code' + langClass + '>' + code + '</code></pre>';
+    });
+
+    // Replace inline code: `...`
+    escaped = escaped.replace(/`([^`]+)`/g, '<code class="inline-code">$1</code>');
+
+    // Convert single newlines to <br> (preserving existing)
+    escaped = escaped.replace(/\n/g, '<br>');
+
+    return escaped;
+  }
+
+  function escapeHtml(str) {
+    return str
+      .replace(/&/g, '&')
+      .replace(/</g, '<')
+      .replace(/>/g, '>')
+      .replace(/"/g, '"');
   }
 
   function scrollToBottom() {
@@ -125,23 +143,16 @@
   function connect() {
     var protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     var wsURL = protocol + '//' + window.location.host + '/api/chat/ws';
-
-    // Include auth token from URL query param if present
     var params = new URLSearchParams(window.location.search);
     var token = params.get('token');
-    if (token) {
-      wsURL += '?token=' + encodeURIComponent(token);
-    }
+    if (token) wsURL += '?token=' + encodeURIComponent(token);
 
     ws = new WebSocket(wsURL);
 
     ws.onopen = function () {
       setStatus('connected');
       reconnectDelay = 1000;
-      if (reconnectTimer) {
-        clearTimeout(reconnectTimer);
-        reconnectTimer = null;
-      }
+      if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
     };
 
     ws.onmessage = function (event) {
@@ -149,40 +160,42 @@
         var msg = JSON.parse(event.data);
         switch (msg.type) {
           case 'chat_session_init':
-            // Session started — could show a welcome message
             break;
           case 'text_delta':
-            // For now, append as simple text. Message grouping
-            // and rich rendering will be added in later items.
-            appendMessage('assistant', msg.text || '');
+            // Group consecutive deltas into one bubble
+            appendDelta(msg.text || '');
             break;
           case 'text_final':
-            // Final text from a turn
+            // Finalize the current bubble
+            finalizeAssistantBubble();
             break;
           case 'tool_start':
-            appendMessage('tool', '[tool] ' + (msg.tool_name || 'unknown'));
+            finalizeAssistantBubble();
+            appendMessage('tool', '<strong>' + escapeHtml(msg.tool_name || 'tool') + '</strong>');
+            break;
+          case 'tool_done':
+            if (msg.output) {
+              appendMessage('tool',
+                '<pre><code>' + escapeHtml(String(msg.output).substring(0, 2000)) + '</code></pre>');
+            }
             break;
           case 'error':
-            appendMessage('error', 'Error: ' + (msg.error || 'unknown'));
+            finalizeAssistantBubble();
+            appendMessage('error', 'Error: ' + escapeHtml(msg.error || 'unknown'));
             break;
           case 'done':
+            finalizeAssistantBubble();
             break;
           default:
             break;
         }
       } catch (err) {
-        // Non-JSON message — ignore
+        // ignore non-JSON
       }
     };
 
-    ws.onclose = function () {
-      setStatus('disconnected');
-      scheduleReconnect();
-    };
-
-    ws.onerror = function () {
-      // onclose will fire after this
-    };
+    ws.onclose = function () { setStatus('disconnected'); scheduleReconnect(); };
+    ws.onerror = function () {};
   }
 
   function scheduleReconnect() {
@@ -200,7 +213,7 @@
     statusPill.textContent = state;
   }
 
-  // ── Sidebar toggle (mobile hamburger) ─────────────────────
+  // ── Sidebar toggle ────────────────────────────────────────
   sidebarToggle.addEventListener('click', function () {
     sidebar.classList.toggle('sidebar-open');
   });

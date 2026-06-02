@@ -356,3 +356,25 @@ footer {
   font-size: var(--text-xs);
   text-align: center;
 }
+
+/* === Code blocks in messages === */
+.message pre {
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  padding: var(--space-md);
+  margin: var(--space-sm) 0;
+  overflow-x: auto;
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  line-height: 1.5;
+}
+.message code {
+  font-family: var(--font-mono);
+  font-size: 0.9em;
+}
+.message .inline-code {
+  background: var(--color-border);
+  padding: 1px 4px;
+  border-radius: 3px;
+}
