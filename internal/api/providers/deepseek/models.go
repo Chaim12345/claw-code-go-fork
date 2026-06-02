@@ -35,7 +35,7 @@ type ModelConfig struct {
 	InputCharacterLimit int    `json:"input_character_limit"`
 	// ThinkEnabled / SearchEnabled are derived from the feature objects
 	// (think_feature / search_feature) being non-nil in the raw response.
-	ThinkEnabled bool
+	ThinkEnabled  bool
 	SearchEnabled bool
 }
 

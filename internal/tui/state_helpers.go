@@ -43,7 +43,7 @@ func (m *Model) logResize(width, height int) {
 func (m *Model) logRender(component string, duration int64) {
 	if m.debugEnabled {
 		debug.Log(debug.EventRender, fmt.Sprintf("Rendered: %s", component), map[string]interface{}{
-			"component": component,
+			"component":   component,
 			"duration_ns": duration,
 		})
 	}

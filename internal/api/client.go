@@ -12,9 +12,9 @@ import (
 )
 
 const (
-	defaultBaseURL        = "https://api.anthropic.com"
-	anthropicVersion      = "2023-06-01"
-	anthropicBetaHeader   = "anthropic-beta"
+	defaultBaseURL         = "https://api.anthropic.com"
+	anthropicVersion       = "2023-06-01"
+	anthropicBetaHeader    = "anthropic-beta"
 	anthropicVersionHeader = "anthropic-version"
 )
 
@@ -36,6 +36,13 @@ func NewClient(apiKey, model string) *Client {
 		Model:      model,
 		HTTPClient: &http.Client{},
 	}
+}
+
+// MaxInputTokens returns the approximate input token limit for Anthropic models.
+// Anthropic models have a 200k token context window; we use 180k as a
+// conservative basis to leave headroom for the system prompt and tool defs.
+func (c *Client) MaxInputTokens() int {
+	return 180_000
 }
 
 // StreamResponse sends a streaming message request and returns a channel of StreamEvents.

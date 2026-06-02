@@ -1,11 +1,13 @@
 package main
 
 import (
+	"claw-code-go/internal/api"
 	"claw-code-go/internal/auth"
 	"claw-code-go/internal/commands"
 	"claw-code-go/internal/compat"
 	"claw-code-go/internal/permissions"
 	"claw-code-go/internal/runtime"
+	"claw-code-go/internal/tools"
 	"claw-code-go/internal/tui"
 	"context"
 	"flag"
@@ -14,6 +16,7 @@ import (
 	"os/signal"
 	"syscall"
 
+	deepseekprovider "claw-code-go/internal/api/providers/deepseek"
 	tea "github.com/charmbracelet/bubbletea"
 )
 
@@ -43,6 +46,7 @@ func main() {
 	sessionFlag := flag.String("session", "", "Session ID to load")
 	sessionDirFlag := flag.String("session-dir", "", "Directory to store sessions")
 	permModeFlag := flag.String("permission-mode", "default", "Permission mode: default, accept-edits, bypass, plan")
+	deltaFlag := flag.Bool("delta", false, "Enable delta mode (DeepSeek only): send only new messages instead of full history")
 	_ = replFlag
 
 	flag.Usage = func() {
@@ -77,6 +81,9 @@ func main() {
 	if *sessionDirFlag != "" {
 		cfg.SessionDir = *sessionDirFlag
 	}
+	if *deltaFlag {
+		cfg.DeltaMode = true
+	}
 
 	// Resolve credentials using the multi-provider credential store.
 	// Env vars take precedence (ANTHROPIC_API_KEY, OPENAI_API_KEY).
@@ -103,6 +110,18 @@ func main() {
 		fmt.Fprintf(os.Stderr, "Note: could not create %s client: %v\n", cfg.ProviderName, clientErr)
 		fmt.Fprintln(os.Stderr, "      Use /login in the TUI to authenticate.")
 		realClient = runtime.NewNoAuthClient()
+	}
+
+	// Wire up DeepSeek native web search if the DeepSeek provider is active.
+	// This enables the web_search tool to use DeepSeek's server-side search
+	// (Instant model with search_enabled=true) instead of Brave/DDG.
+	if cfg.ProviderName == "deepseek" {
+		if dsProvider, ok := realClient.(*deepseekprovider.Client); ok {
+			tools.SetNativeSearch(func(ctx context.Context, query string, numResults int) (string, error) {
+				return dsProvider.NativeSearch(ctx, query, numResults)
+			})
+			fmt.Fprintf(os.Stderr, "[web_search] DeepSeek native search enabled\n")
+		}
 	}
 
 	loop := runtime.NewConversationLoop(cfg, realClient)
@@ -141,6 +160,13 @@ func main() {
 			fmt.Fprintf(os.Stderr, "Warning: could not load session %s: %v\n", *sessionFlag, err)
 		} else {
 			loop.Session = sess
+			// Restore provider-side session state (e.g. DeepSeek
+			// chat_session_id) so delta mode can resume.
+			if ssp, ok := realClient.(api.SessionStateProvider); ok && sess.ProviderSessionState != "" {
+				if err := ssp.RestoreSessionState(sess.ProviderSessionState); err != nil {
+					fmt.Fprintf(os.Stderr, "Warning: could not restore provider session state: %v\n", err)
+				}
+			}
 			fmt.Printf("Loaded session: %s\n", sess.ID)
 		}
 	}
@@ -192,7 +218,10 @@ func runTUI(cfg *runtime.Config, loop *runtime.ConversationLoop) {
 	}()
 
 	model := tui.NewModel(cfg, loop)
-	p := tea.NewProgram(model, tea.WithAltScreen())
+	p := tea.NewProgram(model,
+		tea.WithAltScreen(),
+		tea.WithMouseCellMotion(), // Enable mouse support (wheel, click, motion)
+	)
 
 	if _, err := p.Run(); err != nil {
 		fmt.Fprintf(os.Stderr, "TUI error: %v\n", err)
@@ -204,7 +233,11 @@ func runTUI(cfg *runtime.Config, loop *runtime.ConversationLoop) {
 }
 
 // saveSessionSilent saves the session, printing only to stderr on failure.
+// Marshals provider-side session state before saving so delta mode can resume.
 func saveSessionSilent(dir string, loop *runtime.ConversationLoop) {
+	if ssp, ok := loop.Client.(api.SessionStateProvider); ok {
+		loop.Session.ProviderSessionState = ssp.MarshalSessionState()
+	}
 	if err := runtime.SaveSession(dir, loop.Session); err != nil {
 		fmt.Fprintf(os.Stderr, "Warning: could not save session: %v\n", err)
 	}

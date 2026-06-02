@@ -46,15 +46,15 @@ func TestLiveDumpRawSSE(t *testing.T) {
 	streamID := fmt.Sprintf("%04d%02d%02d-%x", now.Year(), now.Month(), now.Day(), b)
 
 	payload, _ := json.Marshal(map[string]interface{}{
-		"chat_session_id":   sid,
-		"prompt":            "What is 6 * 7? One short sentence, no markdown.",
-		"model_type":        "default",
-		"stream":            true,
-		"ref_file_ids":      []string{},
-		"thinking_enabled":  false,
-		"search_enabled":    false,
-		"preempt":           false,
-		"client_stream_id":  streamID,
+		"chat_session_id":  sid,
+		"prompt":           "What is 6 * 7? One short sentence, no markdown.",
+		"model_type":       "default",
+		"stream":           true,
+		"ref_file_ids":     []string{},
+		"thinking_enabled": false,
+		"search_enabled":   false,
+		"preempt":          false,
+		"client_stream_id": streamID,
 	})
 
 	req, err := http.NewRequestWithContext(context.Background(), "POST",

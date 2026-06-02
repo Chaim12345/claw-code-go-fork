@@ -29,6 +29,12 @@ type Session struct {
 	TotalInputTokens  int `json:"total_input_tokens,omitempty"`
 	TotalOutputTokens int `json:"total_output_tokens,omitempty"`
 	TotalTurns        int `json:"total_turns,omitempty"`
+
+	// ProviderSessionState holds opaque provider-specific session data
+	// that survives program restarts. For DeepSeek, this is a JSON blob
+	// with chat_session_id and parent_message_id so delta mode can
+	// resume server-side conversation state.
+	ProviderSessionState string `json:"provider_session_state,omitempty"`
 }
 
 // NewSession creates a new session with a unique ID based on timestamp.
@@ -57,7 +63,12 @@ func SaveSession(dir string, s *Session) error {
 		return fmt.Errorf("marshal session: %w", err)
 	}
 
-	if err := os.WriteFile(path, data, 0o644); err != nil {
+	// Session files contain full conversation history, including tool
+	// results that may embed sensitive data (file contents, API keys,
+	// etc.). Use owner-only permissions to prevent accidental leakage
+	// on multi-user systems, matching the same security posture as
+	// ~/.deepseek/deepseek_token.txt (0o600).
+	if err := os.WriteFile(path, data, 0o600); err != nil {
 		return fmt.Errorf("write session file: %w", err)
 	}
 

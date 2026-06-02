@@ -10,21 +10,21 @@ import (
 type State string
 
 const (
-	StateInput          State = "input"
-	StateBusy           State = "busy"
-	StatePicker         State = "picker"
-	StateHelp           State = "help"
-	StatePermission     State = "permission"
-	StateLoginProvider  State = "login_provider"
-	StateLoginMethod    State = "login_method"
-	StateLoginAPIKey    State = "login_api_key"
-	StateLoginOAuth     State = "login_oauth"
-	StateAskUser        State = "ask_user"
-	StatePalette        State = "palette"
-	StateSessionPicker  State = "session_picker"
-	StateMention        State = "mention"
-	StateTodoPanel      State = "todo_panel"
-	StateDebugPanel     State = "debug_panel"
+	StateInput         State = "input"
+	StateBusy          State = "busy"
+	StatePicker        State = "picker"
+	StateHelp          State = "help"
+	StatePermission    State = "permission"
+	StateLoginProvider State = "login_provider"
+	StateLoginMethod   State = "login_method"
+	StateLoginAPIKey   State = "login_api_key"
+	StateLoginOAuth    State = "login_oauth"
+	StateAskUser       State = "ask_user"
+	StatePalette       State = "palette"
+	StateSessionPicker State = "session_picker"
+	StateMention       State = "mention"
+	StateTodoPanel     State = "todo_panel"
+	StateDebugPanel    State = "debug_panel"
 )
 
 // StateTransition represents a state change
@@ -38,14 +38,14 @@ type StateTransition struct {
 
 // StateMachine tracks state transitions and validates them
 type StateMachine struct {
-	mu              sync.RWMutex
-	current         State
-	previous        State
-	history         []StateTransition
-	maxHistory      int
-	stateEnterTime  time.Time
+	mu               sync.RWMutex
+	current          State
+	previous         State
+	history          []StateTransition
+	maxHistory       int
+	stateEnterTime   time.Time
 	validTransitions map[State][]State
-	metrics         map[State]*StateMetrics
+	metrics          map[State]*StateMetrics
 }
 
 // StateMetrics tracks metrics for a specific state
@@ -71,7 +71,7 @@ func NewStateMachine(initialState State, maxHistory int) *StateMachine {
 
 	// Define valid state transitions
 	sm.defineTransitions()
-	
+
 	return sm
 }
 
@@ -115,7 +115,7 @@ func (sm *StateMachine) Transition(to State, reason string) error {
 	defer sm.mu.Unlock()
 
 	from := sm.current
-	
+
 	// Validate transition
 	if !sm.isValidTransition(from, to) {
 		err := fmt.Errorf("invalid state transition: %s -> %s", from, to)

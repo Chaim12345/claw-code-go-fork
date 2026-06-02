@@ -47,10 +47,14 @@ func (loop *ConversationLoop) RunTask(ctx context.Context, prompt string) (strin
 	// autonomous sessions. The original loop.Config is shared with
 	// the TUI, so we mutate a copy and point loop.Config at it for
 	// the duration of RunTask.
+	// Save the original Config pointer so the deferred restore
+	// puts back the exact *Config the caller owns (not a copy on
+	// the stack). The runConfig copy is only used for the duration
+	// of RunTask.
+	originalConfig := loop.Config
 	originalTools := loop.Tools
-	originalPermMode := loop.Config.PermissionMode
 	originalPermMgr := loop.PermManager
-	runConfig := *loop.Config
+	runConfig := *originalConfig
 	runConfig.PermissionMode = "bypass"
 	runConfig.Autonomous = true
 	loop.Config = &runConfig
@@ -62,12 +66,9 @@ func (loop *ConversationLoop) RunTask(ctx context.Context, prompt string) (strin
 	loop.Tools = filterOutTool(originalTools, "ask_user")
 
 	defer func() {
+		loop.Config = originalConfig
 		loop.Tools = originalTools
-		loop.Config.PermissionMode = originalPermMode
 		loop.PermManager = originalPermMgr
-		// Pop the temporary runConfig so the caller's *Config is
-		// intact after RunTask returns.
-		loop.Config = originalConfigPtr(loop, originalPermMode)
 	}()
 
 	var lastText string
@@ -226,23 +227,13 @@ func filterOutTool(tools []api.Tool, name string) []api.Tool {
 	return out
 }
 
-// truncate returns the first n bytes of s, appending an ellipsis
+// truncate returns the first n runes of s, appending an ellipsis
 // marker if truncation occurred. Used to keep the judge prompt
 // bounded against huge tool-result pastes.
 func truncate(s string, n int) string {
-	if len(s) <= n {
+	runes := []rune(s)
+	if len(runes) <= n {
 		return s
 	}
-	return s[:n] + "\n[...truncated...]"
-}
-
-// originalConfigPtr rebuilds a *Config that matches the caller's
-// pre-autonomous state, so RunTask's deferred restore is exact.
-// We need a pointer because the caller holds *Config and RunTask
-// temporarily pointed loop.Config at a local copy.
-func originalConfigPtr(loop *ConversationLoop, originalPermMode string) *Config {
-	c := *loop.Config
-	c.PermissionMode = originalPermMode
-	c.Autonomous = false
-	return &c
+	return string(runes[:n]) + "\n[...truncated...]"
 }

@@ -11,6 +11,7 @@ const (
 	TurnEventUsage                              // token usage update
 	TurnEventDone                               // turn fully complete
 	TurnEventWarn                               // warning message (e.g., message truncation)
+	TurnEventInfo                               // informational message (e.g., context management)
 	TurnEventError                              // error occurred
 	TurnEventPermissionAsk                      // permission check required — send reply on PermReply
 	TurnEventAskUser                            // agent needs user input — send reply on AskUserReply
@@ -28,13 +29,13 @@ const (
 // TurnEvent carries information from a streaming API turn to the caller.
 type TurnEvent struct {
 	Type         TurnEventType
-	Text         string // TurnEventTextDelta: the chunk
-	ToolName     string // TurnEventToolStart/Done/PermissionAsk: tool name
-	ToolInput    string // TurnEventToolStart/PermissionAsk: brief input summary
-	ToolResult   string // TurnEventToolDone: output excerpt
-	InputTokens  int    // TurnEventUsage/Done: input token count
-	OutputTokens int    // TurnEventUsage/Done: output token count
-	Err          error  // TurnEventError: the error
+	Text         string            // TurnEventTextDelta: the chunk
+	ToolName     string            // TurnEventToolStart/Done/PermissionAsk: tool name
+	ToolInput    string            // TurnEventToolStart/PermissionAsk: brief input summary
+	ToolResult   string            // TurnEventToolDone: output excerpt
+	InputTokens  int               // TurnEventUsage/Done: input token count
+	OutputTokens int               // TurnEventUsage/Done: output token count
+	Err          error             // TurnEventError: the error
 	PermReply    chan PermDecision // TurnEventPermissionAsk: caller sends decision here
 	AskUserReply chan string       // TurnEventAskUser: caller sends user's answer here
 }

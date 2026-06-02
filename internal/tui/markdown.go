@@ -25,10 +25,10 @@ func renderMarkdown(s string) string {
 	if strings.TrimSpace(s) == "" {
 		return ""
 	}
-	
+
 	mdRendererMu.Lock()
 	defer mdRendererMu.Unlock()
-	
+
 	if mdRenderer == nil || mdRendererStyle != currentTheme.Name {
 		if err := rebuildMarkdownRenderer(); err != nil {
 			// Fall back to plain text on any renderer error — the assistant

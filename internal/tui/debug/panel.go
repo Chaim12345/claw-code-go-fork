@@ -10,13 +10,13 @@ import (
 
 // Panel represents the debug panel UI
 type Panel struct {
-	visible       bool
-	width         int
-	height        int
-	selectedTab   int
-	scrollOffset  int
-	filterType    EventType
-	showMetrics   bool
+	visible      bool
+	width        int
+	height       int
+	selectedTab  int
+	scrollOffset int
+	filterType   EventType
+	showMetrics  bool
 }
 
 // Tab represents a debug panel tab
@@ -171,7 +171,7 @@ func (p *Panel) Render() string {
 // renderEventsTab renders the events tab content
 func (p *Panel) renderEventsTab() string {
 	events := GetRecentEvents(100)
-	
+
 	if p.filterType != "" {
 		filtered := make([]Event, 0)
 		for _, e := range events {
@@ -266,7 +266,7 @@ func (p *Panel) formatEvent(e Event) string {
 // renderStatesTab renders the state transitions tab
 func (p *Panel) renderStatesTab() string {
 	history := GetStateHistory()
-	
+
 	if len(history) == 0 {
 		return lipgloss.NewStyle().
 			Foreground(lipgloss.Color("240")).
@@ -294,7 +294,7 @@ func (p *Panel) renderStatesTab() string {
 	// Add current state info
 	current := GetCurrentState()
 	timeInState := GetTimeInCurrentState()
-	
+
 	currentInfo := lipgloss.NewStyle().
 		Foreground(lipgloss.Color("cyan")).
 		Bold(true).
@@ -372,7 +372,7 @@ func (p *Panel) renderMetricsTab() string {
 // renderToolsTab renders the tools tab
 func (p *Panel) renderToolsTab() string {
 	toolEvents := GetEventsByType(EventToolCall)
-	
+
 	if len(toolEvents) == 0 {
 		return lipgloss.NewStyle().
 			Foreground(lipgloss.Color("240")).

@@ -12,17 +12,21 @@ import (
 
 // StreamingRenderer handles real-time markdown rendering during streaming
 type StreamingRenderer struct {
-	mu              sync.RWMutex
-	buffer          strings.Builder
-	renderedCache   string
-	lastRenderTime  time.Time
-	renderInterval  time.Duration
-	codeBlockOpen   bool
-	codeBlockLang   string
-	codeBlockBuffer strings.Builder
-	inToolCall      bool
-	toolCallBuffer  strings.Builder
-	glamourRenderer *glamour.TermRenderer
+	mu                sync.RWMutex
+	buffer            strings.Builder
+	renderedCache     string
+	lastRenderTime    time.Time
+	renderInterval    time.Duration
+	codeBlockOpen     bool
+	codeBlockLang     string
+	codeBlockBuffer   strings.Builder
+	inToolCall        bool
+	toolCallBuffer    strings.Builder
+	glamourRenderer   *glamour.TermRenderer
+	dirty             bool // indicates buffer has changed since last render
+	pendingPartialTag struct {
+		buffer string
+	} // stores incomplete XML tag that spans chunks
 }
 
 // NewStreamingRenderer creates a new streaming markdown renderer
@@ -33,7 +37,7 @@ func NewStreamingRenderer() *StreamingRenderer {
 	)
 
 	return &StreamingRenderer{
-		renderInterval:  50 * time.Millisecond, // Render every 50ms max
+		renderInterval:  200 * time.Millisecond, // Render every 200ms max (reduced frequency)
 		glamourRenderer: renderer,
 	}
 }
@@ -44,10 +48,11 @@ func (sr *StreamingRenderer) Append(text string) {
 	defer sr.mu.Unlock()
 
 	sr.buffer.WriteString(text)
-	
+	sr.dirty = true
+
 	// Check for code block markers
 	sr.detectCodeBlocks(text)
-	
+
 	// Check for tool call markers
 	sr.detectToolCalls(text)
 }
@@ -57,7 +62,7 @@ func (sr *StreamingRenderer) detectCodeBlocks(text string) {
 	lines := strings.Split(text, "\n")
 	for _, line := range lines {
 		trimmed := strings.TrimSpace(line)
-		
+
 		// Opening code block
 		if strings.HasPrefix(trimmed, "```") && !sr.codeBlockOpen {
 			sr.codeBlockOpen = true
@@ -65,14 +70,14 @@ func (sr *StreamingRenderer) detectCodeBlocks(text string) {
 			sr.codeBlockBuffer.Reset()
 			continue
 		}
-		
+
 		// Closing code block
 		if strings.HasPrefix(trimmed, "```") && sr.codeBlockOpen {
 			sr.codeBlockOpen = false
 			sr.codeBlockLang = ""
 			continue
 		}
-		
+
 		// Inside code block
 		if sr.codeBlockOpen {
 			sr.codeBlockBuffer.WriteString(line)
@@ -81,24 +86,66 @@ func (sr *StreamingRenderer) detectCodeBlocks(text string) {
 	}
 }
 
-// detectToolCalls tracks tool call XML markers
+// pendingPartialTag stores an incomplete tag that spans across chunks
+type pendingPartialTag struct {
+	buffer string
+}
+
+// detectToolCalls tracks tool call XML markers.
+// Only triggers on known tool name tags from validToolNames, not arbitrary
+// angle brackets (which can appear in normal prose like "x < 10").
+// Handles partial tags that span across chunk boundaries by maintaining state.
 func (sr *StreamingRenderer) detectToolCalls(text string) {
-	// Simple detection - look for <tool_name> patterns
-	if strings.Contains(text, "<") && !strings.Contains(text, "</") {
-		// Potential opening tag
-		if !sr.inToolCall {
-			sr.inToolCall = true
-			sr.toolCallBuffer.Reset()
-		}
-	}
-	
+	// Already in a tool call — accumulate and check for closing tag
 	if sr.inToolCall {
 		sr.toolCallBuffer.WriteString(text)
-		
-		// Check for closing tag
 		if strings.Contains(text, "</") {
 			sr.inToolCall = false
 		}
+		return
+	}
+
+	// Combine any pending partial tag from previous chunk with new text
+	fullText := text
+	if sr.pendingPartialTag.buffer != "" {
+		fullText = sr.pendingPartialTag.buffer + text
+		sr.pendingPartialTag.buffer = ""
+	}
+
+	// Scan for potential tool call start tags
+	ltIdx := strings.Index(fullText, "<")
+	if ltIdx < 0 {
+		return
+	}
+
+	// Find the closing '>'
+	remaining := fullText[ltIdx+1:]
+	gtIdx := strings.Index(remaining, ">")
+
+	if gtIdx < 0 {
+		// Incomplete tag: save for next chunk
+		sr.pendingPartialTag.buffer = fullText[ltIdx:]
+		return
+	}
+
+	tagContent := remaining[:gtIdx]
+	tagName := strings.TrimSpace(tagContent)
+
+	// Strip attributes (e.g., 'name="..."' in <invoke name="...">)
+	if spaceIdx := strings.Index(tagName, " "); spaceIdx > 0 {
+		tagName = tagName[:spaceIdx]
+	}
+	if tagName == "" || strings.HasPrefix(tagName, "/") {
+		return
+	}
+
+	// Only trigger on actual tool names (not wrapper tags)
+	if validToolNames[tagName] {
+		sr.inToolCall = true
+		sr.toolCallBuffer.Reset()
+		// Write the full tag including anything before it? No, only the tool call part.
+		// We write from the start of the tag onward
+		sr.toolCallBuffer.WriteString(fullText[ltIdx:])
 	}
 }
 
@@ -107,14 +154,14 @@ func (sr *StreamingRenderer) Render() string {
 	sr.mu.Lock()
 	defer sr.mu.Unlock()
 
-	// Throttle rendering
+	// Throttle rendering: only skip if not dirty and within interval
 	now := time.Now()
-	if now.Sub(sr.lastRenderTime) < sr.renderInterval && sr.renderedCache != "" {
+	if !sr.dirty && now.Sub(sr.lastRenderTime) < sr.renderInterval && sr.renderedCache != "" {
 		return sr.renderedCache
 	}
 
 	content := sr.buffer.String()
-	
+
 	// If we're in a tool call, hide the raw XML
 	if sr.inToolCall {
 		// Return content up to the tool call start
@@ -126,10 +173,11 @@ func (sr *StreamingRenderer) Render() string {
 
 	// Render markdown
 	rendered := sr.renderMarkdown(content)
-	
+
 	sr.renderedCache = rendered
 	sr.lastRenderTime = now
-	
+	sr.dirty = false
+
 	return rendered
 }
 

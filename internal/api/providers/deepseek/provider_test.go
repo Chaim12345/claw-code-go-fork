@@ -62,11 +62,11 @@ func TestProviderNewClientFallsBackToAPIKey(t *testing.T) {
 
 func TestParseModelName(t *testing.T) {
 	cases := []struct {
-		name        string
-		input       string
-		wantType    string
-		wantThink   bool
-		wantSearch  bool
+		name       string
+		input      string
+		wantType   string
+		wantThink  bool
+		wantSearch bool
 	}{
 		{"empty", "", "default", false, false},
 		{"instant", "instant", "default", false, false},
@@ -239,9 +239,9 @@ func TestExtractSingleJsonToolCall(t *testing.T) {
 // valid JSON object, ignoring surrounding noise.
 func TestExtractJsonToolCallsNoisyText(t *testing.T) {
 	cases := []struct {
-		name string
-		text string
-		want string // expected tool name
+		name    string
+		text    string
+		want    string // expected tool name
 		wantKey string
 		wantArg string
 	}{
@@ -677,16 +677,16 @@ data: {"p":"response","o":"BATCH","v":[{"p":"quasi_status","v":"FINISHED"}]}
 // this test will tell you if you forgot.
 func TestKnownToolsMatchExecutor(t *testing.T) {
 	executable := map[string]bool{
-		tools.BashTool().Name:       true,
-		tools.ReadFileTool().Name:   true,
-		tools.WriteFileTool().Name:  true,
-		tools.FileEditTool().Name:   true,
-		tools.GlobTool().Name:       true,
-		tools.GrepTool().Name:       true,
-		tools.WebFetchTool().Name:   true,
-		tools.WebSearchTool().Name:  true,
+		tools.BashTool().Name:            true,
+		tools.ReadFileTool().Name:        true,
+		tools.WriteFileTool().Name:       true,
+		tools.FileEditTool().Name:        true,
+		tools.GlobTool().Name:            true,
+		tools.GrepTool().Name:            true,
+		tools.WebFetchTool().Name:        true,
+		tools.WebSearchTool().Name:       true,
 		tools.AskUserQuestionTool().Name: true,
-		tools.TodoWriteTool().Name:  true,
+		tools.TodoWriteTool().Name:       true,
 	}
 	// The parser must accept every tool the executor can run.
 	for name := range executable {

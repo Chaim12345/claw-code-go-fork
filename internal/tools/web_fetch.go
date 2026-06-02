@@ -11,14 +11,16 @@ import (
 )
 
 const (
-	defaultMaxBytes  = 50 * 1024 // 50 KB
-	webFetchTimeout  = 15 * time.Second
+	defaultMaxBytes = 50 * 1024 // 50 KB
+	webFetchTimeout = 15 * time.Second
 )
 
 var (
-	reHTMLTag    = regexp.MustCompile(`<[^>]+>`)
-	reWhitespace = regexp.MustCompile(`[ \t]+`)
-	reBlankLines = regexp.MustCompile(`\n{3,}`)
+	reHTMLTag         = regexp.MustCompile(`<[^>]+>`)
+	reWhitespace      = regexp.MustCompile(`[ \t]+`)
+	reBlankLines      = regexp.MustCompile(`\n{3,}`)
+	reScriptStyleTags = regexp.MustCompile(`(?is)<(script|style)[^>]*>.*?</(script|style)>`)
+	reBlockLevelTags  = regexp.MustCompile(`(?i)<(br|p|div|h[1-6]|li|tr|blockquote)[^>]*>`)
 )
 
 // WebFetchTool returns the tool definition for fetching URLs.
@@ -90,9 +92,9 @@ func ExecuteWebFetch(input map[string]any) (string, error) {
 // stripHTML removes HTML tags and normalizes whitespace.
 func stripHTML(s string) string {
 	// Remove script and style blocks entirely
-	s = regexp.MustCompile(`(?is)<(script|style)[^>]*>.*?</(script|style)>`).ReplaceAllString(s, "")
+	s = reScriptStyleTags.ReplaceAllString(s, "")
 	// Replace block-level tags with newlines
-	s = regexp.MustCompile(`(?i)<(br|p|div|h[1-6]|li|tr|blockquote)[^>]*>`).ReplaceAllLiteralString(s, "\n")
+	s = reBlockLevelTags.ReplaceAllLiteralString(s, "\n")
 	// Strip remaining tags
 	s = reHTMLTag.ReplaceAllString(s, "")
 	// Decode common HTML entities

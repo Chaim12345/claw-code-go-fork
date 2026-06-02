@@ -64,9 +64,9 @@ func TestLiveExploreRawStream(t *testing.T) {
 }
 
 type recorder struct {
-	text        strings.Builder
-	rawLines    []string
-	msgIDCount  int
+	text       strings.Builder
+	rawLines   []string
+	msgIDCount int
 }
 
 func (r *recorder) handler(ev StreamEvent) bool {

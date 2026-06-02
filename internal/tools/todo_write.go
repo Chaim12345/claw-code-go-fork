@@ -82,14 +82,23 @@ func writeTodos(input map[string]any) (string, error) {
 		return "", fmt.Errorf("todo_write: 'todos' array is required for action=write")
 	}
 
-	// Marshal and unmarshal to validate structure
-	raw, err := json.Marshal(todosRaw)
-	if err != nil {
-		return "", fmt.Errorf("todo_write: encode todos: %w", err)
+	// Handle case where todosRaw is a JSON string instead of a slice
+	var rawData []byte
+	switch v := todosRaw.(type) {
+	case string:
+		rawData = []byte(v)
+	case []byte:
+		rawData = v
+	default:
+		var err error
+		rawData, err = json.Marshal(todosRaw)
+		if err != nil {
+			return "", fmt.Errorf("todo_write: encode todos: %w", err)
+		}
 	}
 
 	var todos []TodoItem
-	if err := json.Unmarshal(raw, &todos); err != nil {
+	if err := json.Unmarshal(rawData, &todos); err != nil {
 		return "", fmt.Errorf("todo_write: validate todos: %w", err)
 	}
 

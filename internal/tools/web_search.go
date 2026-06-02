@@ -2,6 +2,7 @@ package tools
 
 import (
 	"claw-code-go/internal/api"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -13,17 +14,35 @@ import (
 )
 
 const (
-	braveSearchURL  = "https://api.search.brave.com/res/v1/web/search"
-	ddgLiteURL      = "https://lite.duckduckgo.com/lite/"
-	searchTimeout   = 15 * time.Second
-	defaultNumResults = 5
+	braveSearchURL        = "https://api.search.brave.com/res/v1/web/search"
+	ddgLiteURL            = "https://lite.duckduckgo.com/lite/"
+	searchTimeout         = 15 * time.Second
+	deepseekSearchTimeout = 45 * time.Second
+	defaultNumResults     = 5
 )
+
+// NativeSearchFunc is an optional backend that performs a web search using
+// the provider's native search capabilities (e.g. DeepSeek instant+search).
+// When set, ExecuteWebSearch delegates to this function instead of using
+// Brave/DDG. The function is called with a context and returns the search
+// result text or an error.
+var NativeSearchFunc func(ctx context.Context, query string, numResults int) (string, error)
+
+// SetNativeSearch configures a provider-native search backend.
+// Call this once at startup to enable DeepSeek-style native web search.
+func SetNativeSearch(fn func(ctx context.Context, query string, numResults int) (string, error)) {
+	NativeSearchFunc = fn
+}
 
 // WebSearchTool returns the tool definition for web search.
 func WebSearchTool() api.Tool {
+	desc := "Search the web and return a list of results with title, URL, and snippet. Uses Brave Search API if BRAVE_API_KEY is set, otherwise DuckDuckGo."
+	if NativeSearchFunc != nil {
+		desc = "Search the web using the AI provider's native search engine and return results with title, URL, and snippet."
+	}
 	return api.Tool{
 		Name:        "web_search",
-		Description: "Search the web and return a list of results with title, URL, and snippet. Uses Brave Search API if BRAVE_API_KEY is set, otherwise DuckDuckGo.",
+		Description: desc,
 		InputSchema: api.InputSchema{
 			Type: "object",
 			Properties: map[string]api.Property{
@@ -42,6 +61,8 @@ func WebSearchTool() api.Tool {
 }
 
 // ExecuteWebSearch performs a web search and returns formatted results.
+// If a NativeSearchFunc is registered, it delegates to the provider's native
+// search (e.g. DeepSeek instant+search). Otherwise falls back to Brave/DDG.
 func ExecuteWebSearch(input map[string]any) (string, error) {
 	query, ok := input["query"].(string)
 	if !ok || query == "" {
@@ -62,6 +83,19 @@ func ExecuteWebSearch(input map[string]any) (string, error) {
 	}
 	if numResults > 20 {
 		numResults = 20
+	}
+
+	// Delegate to provider-native search if available.
+	if NativeSearchFunc != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), deepseekSearchTimeout)
+		defer cancel()
+		result, err := NativeSearchFunc(ctx, query, numResults)
+		if err != nil {
+			// Fall back to Brave/DDG on native search failure.
+			fmt.Fprintf(os.Stderr, "[web_search] native search failed: %v; falling back to Brave/DDG\n", err)
+		} else {
+			return result, nil
+		}
 	}
 
 	if apiKey := os.Getenv("BRAVE_API_KEY"); apiKey != "" {

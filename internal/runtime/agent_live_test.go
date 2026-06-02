@@ -74,10 +74,10 @@ func safeWD(t *testing.T, workdir string) {
 // edit it → glob to find generated artifacts.
 //
 // Verifies that:
-//  - tool calls work (bash, read, write, edit, grep, glob)
-//  - the conversation loop continues across multiple tool turns
-//  - the final answer references the files actually on disk
-//  - the tool dispatcher recognises the names emitted by the deepseek provider
+//   - tool calls work (bash, read, write, edit, grep, glob)
+//   - the conversation loop continues across multiple tool turns
+//   - the final answer references the files actually on disk
+//   - the tool dispatcher recognises the names emitted by the deepseek provider
 func TestLiveAgentCodingTask(t *testing.T) {
 	workdir := t.TempDir()
 	safeWD(t, workdir)

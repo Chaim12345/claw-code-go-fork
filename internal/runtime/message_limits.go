@@ -27,21 +27,21 @@ const (
 // Returns the potentially modified message and a boolean indicating if truncation occurred.
 func ValidateAndTruncateMessage(msg api.Message) (api.Message, bool) {
 	truncated := false
-	
+
 	// Check each content block
 	for i := range msg.Content {
 		block := &msg.Content[i]
-		
+
 		// Only truncate text blocks (images, tool results, etc. are handled differently)
 		if block.Type != "text" {
 			continue
 		}
-		
+
 		textLen := len(block.Text)
 		if textLen <= maxMessageChars {
 			continue
 		}
-		
+
 		// Truncate at a line boundary when possible for readability
 		cut := maxMessageChars - len(truncationMarker) - 100
 		if cut <= 0 {
@@ -49,21 +49,21 @@ func ValidateAndTruncateMessage(msg api.Message) (api.Message, bool) {
 			truncated = true
 			continue
 		}
-		
+
 		truncatedText := block.Text[:cut]
-		
+
 		// Try to cut at a line boundary
 		if nl := strings.LastIndex(truncatedText, "\n"); nl > cut-500 && nl > 0 {
 			truncatedText = truncatedText[:nl]
 		}
-		
+
 		block.Text = truncatedText + truncationMarker
 		truncated = true
-		
+
 		fmt.Fprintf(os.Stderr, "[message-truncate] truncated text block from %d to %d chars\n",
 			textLen, len(block.Text))
 	}
-	
+
 	return msg, truncated
 }
 
@@ -92,7 +92,7 @@ func EstimateMessageTokens(msg api.Message) int {
 			}
 		}
 	}
-	
+
 	const charsPerToken = 4
 	if totalChars == 0 {
 		return 0
@@ -103,4 +103,39 @@ func EstimateMessageTokens(msg api.Message) int {
 // ShouldTruncateMessage returns true if a message should be truncated before sending.
 func ShouldTruncateMessage(msg api.Message) bool {
 	return EstimateMessageTokens(msg) > maxMessageTokens
+}
+
+// ValidateAndTruncateResults truncates individual tool-result content blocks
+// that exceed maxMessageChars. This prevents massive file reads or command
+// outputs from filling the session with a single bloated message.
+func ValidateAndTruncateResults(blocks []api.ContentBlock) []api.ContentBlock {
+	for i := range blocks {
+		block := &blocks[i]
+		if block.Type != "tool_result" {
+			continue
+		}
+		for j := range block.Content {
+			inner := &block.Content[j]
+			if inner.Type != "text" {
+				continue
+			}
+			textLen := len(inner.Text)
+			if textLen <= maxMessageChars {
+				continue
+			}
+			cut := maxMessageChars - len(truncationMarker) - 100
+			if cut <= 0 {
+				inner.Text = truncationMarker
+				continue
+			}
+			truncatedText := inner.Text[:cut]
+			if nl := strings.LastIndex(truncatedText, "\n"); nl > cut-500 && nl > 0 {
+				truncatedText = truncatedText[:nl]
+			}
+			inner.Text = truncatedText + truncationMarker
+			fmt.Fprintf(os.Stderr, "[tool-result-truncate] truncated tool result from %d to %d chars\n",
+				textLen, len(inner.Text))
+		}
+	}
+	return blocks
 }

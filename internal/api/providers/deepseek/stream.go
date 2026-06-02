@@ -55,23 +55,23 @@ func ExtractToolCalls(text string) []api.ToolCall {
 	if len(text) == 0 {
 		return nil
 	}
-	
+
 	// Fast path: check for tool call indicators before expensive parsing
 	hasToolIndicators := strings.Contains(text, "tool_calls") ||
 		strings.Contains(text, "function_call") ||
 		strings.Contains(text, "Action:") ||
 		strings.Contains(text, "<tool_") ||
 		strings.Contains(text, "{\"tool")
-	
+
 	if !hasToolIndicators {
 		return nil
 	}
-	
+
 	// Collapse excessive tool_calls tags before parsing
 	if strings.Count(text, "<tool_calls>") > 50 {
 		text = collapseExcessiveToolCalls(text)
 	}
-	
+
 	// Try XML first (preferred for DeepSeek, better streaming compatibility)
 	if calls := extractXmlToolCalls(text); len(calls) > 0 {
 		return calls
@@ -122,7 +122,7 @@ func extractJsonToolCalls(text string) []api.ToolCall {
 	}
 	seen := make(map[string]bool)
 	var calls []ToolCall
-		add := func(callsToAdd []api.ToolCall) {
+	add := func(callsToAdd []api.ToolCall) {
 		for _, c := range callsToAdd {
 			key := toolCallKey(c)
 			if seen[key] {
@@ -193,7 +193,7 @@ func callsFromObject(obj map[string]interface{}) []api.ToolCall {
 			}
 			args[k] = v
 		}
-			calls = append(calls, api.ToolCall{Name: name, Arguments: args})
+		calls = append(calls, api.ToolCall{Name: name, Arguments: args})
 	}
 	return calls
 }
@@ -363,7 +363,7 @@ func extractReactToolCalls(text string) []api.ToolCall {
 		}
 		var args map[string]interface{}
 		if json.Unmarshal([]byte(input), &args) == nil {
-		calls = append(calls, api.ToolCall{Name: name, Arguments: args})
+			calls = append(calls, api.ToolCall{Name: name, Arguments: args})
 			continue
 		}
 		// Action Input wasn't a JSON object. Two reasonable choices:

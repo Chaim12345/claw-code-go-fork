@@ -5,12 +5,42 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 const (
-	DefaultModel     = "claude-sonnet-4-20250514"
+	// DefaultModel is the primary reasoning model for new sessions.
+	// "expert" maps to DeepSeek's powerful reasoning model (equivalent to R1).
+	DefaultModel     = "expert"
 	DefaultMaxTokens = 8096
 )
+
+// mapClaudeToDeepSeek converts Claude model names to appropriate DeepSeek variants.
+// This allows seamless migration from Anthropic to DeepSeek.
+func mapClaudeToDeepSeek(model string) string {
+	if model == "" {
+		return ""
+	}
+	// Claude to DeepSeek mapping
+	switch model {
+	case "claude-sonnet-4-20250514", "claude-sonnet-4", "claude-3-5-sonnet", "sonnet":
+		return "expert-thinking"
+	case "claude-3-opus", "claude-3-opus-20240229", "opus":
+		return "vision-thinking"
+	case "claude-3-haiku", "claude-3-haiku-20240307", "haiku":
+		return "instant-thinking-search"
+	case "claude-3-sonnet", "claude-3-sonnet-20240229":
+		return "expert"
+	case "claude-2", "claude-2.1", "claude-instant":
+		return "instant"
+	}
+	// If it's already a DeepSeek model name, return as-is
+	if strings.Contains(model, "instant") || strings.Contains(model, "expert") || strings.Contains(model, "vision") {
+		return model
+	}
+	// Default fallback
+	return "instant-thinking-search"
+}
 
 // MCPServerConfig describes a single MCP server connection.
 type MCPServerConfig struct {
@@ -32,7 +62,7 @@ type Config struct {
 	BaseURL      string
 
 	// Provider and auth fields (Phase 3).
-	// ProviderName is one of: "anthropic", "bedrock", "vertex", "foundry".
+	// ProviderName is one of: "anthropic", "bedrock", "vertex", "foundry", "deepseek".
 	ProviderName string
 	// AuthMethod is one of: "api_key", "oauth", "iam", "adc", "azure_identity".
 	AuthMethod string
@@ -80,6 +110,11 @@ type Config struct {
 	// MaxTurns caps the number of SendMessage iterations inside
 	// RunTask. Zero means use DefaultAutonomousMaxTurns.
 	MaxTurns int
+
+	// DeltaMode sends only new messages + tool results instead of full history.
+	// Only supported for DeepSeek provider. When enabled, reduces per-request
+	// token usage from ~40K to ~2-3K by leveraging server-side conversation state.
+	DeltaMode bool
 }
 
 // DefaultAutonomousMaxTurns is the default cap for RunTask iterations
@@ -126,6 +161,9 @@ func LoadConfig() *Config {
 	if s.Theme != "" {
 		cfg.Theme = s.Theme
 	}
+	if s.CompactionMaxInputTokens != 0 {
+		cfg.CompactionMaxInputTokens = s.CompactionMaxInputTokens
+	}
 
 	// Environment variables override settings files.
 	if key := os.Getenv("ANTHROPIC_API_KEY"); key != "" {
@@ -149,15 +187,21 @@ func LoadConfig() *Config {
 	// Detect the active provider from environment variables.
 	cfg.ProviderName = detectProvider()
 
+	// Map Claude model names to DeepSeek variants when deepseek provider is active.
+	if cfg.ProviderName == "deepseek" {
+		mapped := mapClaudeToDeepSeek(cfg.Model)
+		if mapped != cfg.Model {
+			cfg.Model = mapped
+		}
+	}
+
 	// When the deepseek provider is in use and no model was set by
-	// settings files / env / CLI flags, default to "expert" — the
-	// chain-of-thought variant that the web UI highlights for
-	// complex problems. The /settings endpoint reports
-	// input_character_limit=163,840 for it (live-probed in
-	// TestLiveProbeActualInputLimit/expert — server enforces the
-	// same value). The provider's DefaultModel constant is the
-	// authoritative source of truth.
-	if cfg.ProviderName == "deepseek" && cfg.Model == DefaultModel {
+	// settings files / env / CLI flags, default to "expert"
+	// — the Expert model (DeepSeek's powerful reasoning model, equivalent to R1)
+	// with thinking disabled by default (can be enabled via "expert-thinking").
+	// Expert provides deep reasoning capabilities while being cost-effective.
+	// If the user previously set a Claude model, mapClaudeToDeepSeek will convert it.
+	if cfg.ProviderName == "deepseek" && cfg.Model == "" {
 		if v := os.Getenv("DEEPSEEK_MODEL"); v != "" {
 			cfg.Model = v
 		} else {
@@ -210,10 +254,13 @@ func loadMCPServers(homeDir string) []MCPServerConfig {
 }
 
 // detectProvider reads env vars to determine which provider to use.
+// DeepSeek takes precedence over Anthropic when DEEPSEEK_TOKEN is set.
 func detectProvider() string {
-	switch {
-	case os.Getenv("DEEPSEEK_TOKEN") != "" || os.Getenv("CLAUDE_CODE_USE_DEEPSEEK") == "1":
+	// DeepSeek has highest precedence when token is present
+	if os.Getenv("DEEPSEEK_TOKEN") != "" || os.Getenv("CLAUDE_CODE_USE_DEEPSEEK") == "1" {
 		return "deepseek"
+	}
+	switch {
 	case os.Getenv("CLAUDE_CODE_USE_BEDROCK") == "1":
 		return "bedrock"
 	case os.Getenv("CLAUDE_CODE_USE_VERTEX") == "1":
@@ -235,14 +282,6 @@ func detectProvider() string {
 func PerProviderCompactionMax(providerName, model string) int {
 	switch providerName {
 	case "deepseek":
-		// Use the model's own cap so the threshold tracks what the
-		// server will actually accept. /settings reports:
-		//   instant:  2,621,440 chars = 655,360 tokens
-		//   expert:     163,840 chars =  40,960 tokens
-		//   vision:   2,621,440 chars = 655,360 tokens
-		// Live-probe (probe_limit_live_test.go) confirmed both the
-		// client-side pre-flight cap and the server's enforcement
-		// match these values exactly.
 		const charsPerToken = 4
 		switch model {
 		case "instant", "default":
@@ -255,6 +294,13 @@ func PerProviderCompactionMax(providerName, model string) int {
 		// Unknown deepseek model — fall back to the conservative
 		// Expert cap (smallest of the known variants).
 		return 163_840 / charsPerToken
+	case "anthropic":
+		// Anthropic models have a 200k token context window.
+		// Use a conservative 180k basis to leave headroom for
+		// the system prompt, tool definitions, and response.
+		// Without this, ShouldCompact falls back to MaxTokens
+		// (default 8k output budget) and compacts far too early.
+		return 180_000
 	}
 	_ = model
 	return 0

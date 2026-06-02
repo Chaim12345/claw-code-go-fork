@@ -61,3 +61,8 @@ func (h *inputHistory) Reset() {
 	h.pos = -1
 	h.draft = ""
 }
+
+// GetAll returns all history entries (copy of internal slice).
+func (h *inputHistory) GetAll() []string {
+	return append([]string{}, h.entries...)
+}

@@ -19,11 +19,11 @@ import (
 // TestLiveAgentFullStackProject is a 5-step end-to-end build that
 // exercises every code-tool path through the agentic loop:
 //
-//   1. Glob the project for existing files
-//   2. Read the package metadata
-//   3. Write three new modules
-//   4. Grep for the new function names to confirm they're present
-//   5. Run `go build` and `go test` and report the exit status
+//  1. Glob the project for existing files
+//  2. Read the package metadata
+//  3. Write three new modules
+//  4. Grep for the new function names to confirm they're present
+//  5. Run `go build` and `go test` and report the exit status
 //
 // It also forces two intermediate compaction boundaries by injecting
 // filler turns between steps 3 and 4, so we verify that the

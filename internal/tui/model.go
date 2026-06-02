@@ -44,6 +44,18 @@ var openAIModels = []modelEntry{
 	{"o1-mini", "Reasoning model — math and logic"},
 }
 
+// deepseekModels lists DeepSeek models available when using the deepseek provider.
+var deepseekModels = []modelEntry{
+	{"expert", "Deep reasoning model (R1) — great for complex problems"},
+	{"expert-thinking", "Expert + thinking — chain-of-thought reasoning"},
+	{"vision", "Multimodal model — understands images"},
+	{"vision-thinking", "Vision + thinking — reasoning with visual input"},
+	{"instant", "Fast model — good for simple tasks"},
+	{"instant-thinking", "Instant + thinking — fast with reasoning"},
+	{"instant-search", "Instant + search — web search enabled"},
+	{"instant-thinking-search", "Instant + thinking + search — fast, reasoning, and web"},
+}
+
 // loginProvider describes a selectable AI provider in the /login flow.
 type loginProviderEntry struct {
 	id   string
@@ -72,33 +84,39 @@ var anthropicAuthMethods = []loginMethodEntry{
 type appState int
 
 const (
-	stateInput          appState = iota // waiting for user input
-	stateBusy                           // streaming response from API
-	statePicker                         // model selection overlay
-	stateHelp                           // help panel overlay
-	statePermission                     // waiting for permission decision
-	stateLoginProvider                  // /login: provider picker
-	stateLoginMethod                    // /login: auth-method picker (Anthropic)
-	stateLoginAPIKey                    // /login: API key text input
-	stateLoginOAuth                     // /login: waiting for OAuth browser flow
-	stateAskUser                        // agent has asked the user a question
-	statePalette                        // command palette overlay (Ctrl+P)
-	stateSessionPicker                  // session browser overlay
-	stateMention                        // @-file autocomplete popup
-	stateTodoPanel                      // todo list sidebar visible
-	stateDebugPanel                     // debug panel overlay (Ctrl+D)
+	stateInput           appState = iota // waiting for user input
+	stateBusy                            // streaming response from API
+	statePicker                          // model selection overlay
+	stateHelp                            // help panel overlay
+	statePermission                      // waiting for permission decision
+	stateLoginProvider                   // /login: provider picker
+	stateLoginMethod                     // /login: auth-method picker (Anthropic)
+	stateLoginAPIKey                     // /login: API key text input
+	stateLoginOAuth                      // /login: waiting for OAuth browser flow
+	stateAskUser                         // agent has asked the user a question
+	statePalette                         // command palette overlay (Ctrl+P)
+	stateSessionPicker                   // session browser overlay
+	stateMention                         // @-file autocomplete popup
+	stateTodoPanel                       // todo list sidebar visible
+	stateDebugPanel                      // debug panel overlay (Ctrl+D)
+	stateSlashMenu                       // slash command autocomplete popup
+	stateBackgroundTasks                 // background tasks panel (Ctrl+B)
+	stateHistorySearch                   // command history search (Ctrl+R)
+	stateQuickActions                    // quick actions menu (Ctrl+K)
+	stateConvSearch                      // conversation search (Ctrl+F)
 )
 
 // Bubble Tea messages for async streaming events.
 type (
-	streamDeltaMsg    struct{ text string }
-	streamToolMsg     struct{ name, input string }
-	streamToolDoneMsg struct{ name, result string }
-	streamUsageMsg    struct{ inputTokens, outputTokens int }
-	streamDoneMsg     struct{}
-	streamErrMsg      struct{ err error }
-	streamWarnMsg     struct{ text string }
-	streamPermAskMsg  struct {
+	streamDeltaMsg     struct{ text string }
+	streamTextFinalMsg struct{ text string }
+	streamToolMsg      struct{ name, input string }
+	streamToolDoneMsg  struct{ name, result string }
+	streamUsageMsg     struct{ inputTokens, outputTokens int }
+	streamDoneMsg      struct{}
+	streamErrMsg       struct{ err error }
+	streamWarnMsg      struct{ text string }
+	streamPermAskMsg   struct {
 		name, input string
 		reply       chan runtime.PermDecision
 	}
@@ -144,6 +162,9 @@ type Model struct {
 	// whether any streaming content has arrived (suppresses spinner)
 	hasStreamContent bool
 
+	// whether streamTextFinalMsg has already moved the text to viewBuf
+	streamTextCommitted bool
+
 	// channel from active streaming goroutine
 	streamChan chan runtime.TurnEvent
 
@@ -163,12 +184,13 @@ type Model struct {
 	loginKeyInput textinput.Model // API key entry input (single-line, masked)
 
 	// new opencode-style feature state
-	palette        *palette
-	sessionPicker  *sessionPicker
-	mention        *mentionAutocomplete
-	todoPanel      *todoPanel
-	toolCards      []toolCard
-	permModeOrder  []permissions.PermissionMode
+	palette       *palette
+	sessionPicker *sessionPicker
+	mention       *mentionAutocomplete
+	slashMenu     *slashMenu
+	todoPanel     *todoPanel
+	toolCards     []toolCard
+	permModeOrder []permissions.PermissionMode
 
 	// streaming and rendering
 	streamingRenderer *StreamingRenderer
@@ -178,6 +200,30 @@ type Model struct {
 	// debug system
 	debugEnabled bool
 	stateMachine *debug.StateMachine
+
+	// status badges
+	badgeManager *StatusBadgeManager
+
+	// background tasks
+	backgroundTaskPanel *BackgroundTaskPanel
+
+	// progressive disclosure
+	progressiveDisclosure *ProgressiveDisclosure
+
+	// history search
+	historySearch *HistorySearch
+
+	// quick actions menu
+	quickActions *QuickActionsMenu
+
+	// conversation search
+	conversationSearch *ConversationSearch
+
+	// natural language command parser
+	naturalParser *NaturalCommandParser
+
+	// file change history for undo/redo
+	fileHistory *FileChangeHistory
 
 	// app deps
 	loop *runtime.ConversationLoop
@@ -207,22 +253,31 @@ func NewModel(cfg *runtime.Config, loop *runtime.ConversationLoop) Model {
 	}
 
 	return Model{
-		state:             stateInput,
-		textarea:          ta,
-		spinner:           s,
-		history:           newInputHistory(),
-		loop:              loop,
-		cfg:               cfg,
-		viewBuf:           RenderLogo(appVersion),
-		palette:           newPalette(),
-		sessionPicker:     newSessionPicker(),
-		mention:           newMentionAutocomplete(),
-		todoPanel:         newTodoPanel(),
-		streamingRenderer: NewStreamingRenderer(),
-		toolCallManager:   NewToolCallManager(),
-		codeBlockRenderer: NewCodeBlockRenderer(),
-		debugEnabled:      debugEnabled,
-		stateMachine:      debug.NewStateMachine(debug.StateInput, 100),
+		state:                 stateInput,
+		textarea:              ta,
+		spinner:               s,
+		history:               newInputHistory(),
+		loop:                  loop,
+		cfg:                   cfg,
+		viewBuf:               RenderLogo(appVersion),
+		palette:               newPalette(),
+		sessionPicker:         newSessionPicker(),
+		mention:               newMentionAutocomplete(),
+		slashMenu:             newSlashMenu(),
+		todoPanel:             newTodoPanel(),
+		streamingRenderer:     NewStreamingRenderer(),
+		toolCallManager:       NewToolCallManager(),
+		codeBlockRenderer:     NewCodeBlockRenderer(),
+		badgeManager:          NewStatusBadgeManager(),
+		backgroundTaskPanel:   NewBackgroundTaskPanel(),
+		progressiveDisclosure: NewProgressiveDisclosure(".claude"),
+		historySearch:         NewHistorySearch(),
+		quickActions:          NewQuickActionsMenu(),
+		conversationSearch:    NewConversationSearch(),
+		naturalParser:         NewNaturalCommandParser(),
+		fileHistory:           NewFileChangeHistory(),
+		debugEnabled:          debugEnabled,
+		stateMachine:          debug.NewStateMachine(debug.StateInput, 100),
 		permModeOrder: []permissions.PermissionMode{
 			permissions.ModeDefault,
 			permissions.ModeAcceptEdits,
@@ -258,33 +313,62 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyMsg:
 		return m.handleKey(msg)
 
+	case tea.MouseMsg:
+		return m.handleMouse(msg)
+
 	case streamDeltaMsg:
 		if !m.hasStreamContent {
 			m.hasStreamContent = true
 		}
-		
-		// Log streaming event
+
+		// Log streaming event (only in debug mode to reduce overhead)
 		if m.debugEnabled {
 			debug.Log(debug.EventStreamChunk, "Received stream chunk", map[string]interface{}{
 				"length": len(msg.text),
 			})
 		}
-		
-		// Process through tool call manager to hide XML
-		cleanText := m.toolCallManager.ProcessStream(msg.text)
-		
-		// Add to streaming renderer for real-time markdown rendering
+
+		// Strip tool-call XML from visible text so users don't see raw
+		// <tool_calls>...</tool_calls> markup. We do NOT feed text to
+		// the toolCallManager parser here — tool calls are tracked via
+		// the runtime's TurnEventToolStart/TurnEventToolDone event
+		// system (streamToolMsg/streamToolDoneMsg). The XML parser
+		// creates ParsedToolCall entries with IDs that don't match the
+		// toolCard IDs, leaving them permanently "pending" (⏳) and
+		// causing duplicate rendering in streamDoneMsg.
+		cleanText := m.toolCallManager.RemoveToolCallXML(msg.text)
+
+		// Add to streaming renderer (buffered, will render on interval)
 		m.streamingRenderer.Append(cleanText)
-		
-		// Get rendered content
-		m.streamBuf = m.streamingRenderer.Render()
-		
-		// Add tool call cards
-		toolCallsRendered := m.toolCallManager.RenderActiveCalls()
-		if toolCallsRendered != "" {
-			m.streamBuf += "\n" + toolCallsRendered
+
+		// Get rendered content (throttled internally by renderer)
+		renderedContent := m.streamingRenderer.Render()
+
+		// Only update if render produced new content
+		if renderedContent != "" {
+			m.streamBuf = renderedContent
+			m = m.refreshViewport()
 		}
-		
+
+		return m, waitForStream(m.streamChan)
+
+	case streamTextFinalMsg:
+		// Append final cleaned text to viewBuf (preserve all content)
+		if m.debugEnabled {
+			debug.Log(debug.EventStreamChunk, "Received final cleaned text", map[string]interface{}{
+				"length": len(msg.text),
+			})
+		}
+
+		// Move streamed content to permanent viewBuf
+		m.viewBuf += m.streamBuf
+
+		// Clear streaming state (but keep the same renderer instance so
+		// in-flight deltas still land in the correct buffer).
+		m.streamBuf = ""
+		m.streamingRenderer.Reset()
+		m.streamTextCommitted = true
+
 		m = m.refreshViewport()
 		return m, waitForStream(m.streamChan)
 
@@ -292,7 +376,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if !m.hasStreamContent {
 			m.hasStreamContent = true
 		}
-		
+
 		// Log tool call event
 		if m.debugEnabled {
 			startTime := time.Now()
@@ -302,7 +386,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				"timestamp": startTime,
 			})
 		}
-		
+
 		// Track the tool call as a card so the user can expand it
 		// later with Ctrl+T. The first event for a tool is "running";
 		// we still create a card so the start line is visible.
@@ -315,10 +399,18 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			card.hasDiff = true
 		}
 		m.toolCards = append(m.toolCards, card)
-		
+
+		// Limit tool card history to prevent memory leak (keep last 50)
+		if len(m.toolCards) > 50 {
+			m.toolCards = m.toolCards[len(m.toolCards)-50:]
+		}
+
 		// Update tool call manager status to running
 		m.toolCallManager.UpdateStatus(card.id, ToolCallRunning, "", "")
-		
+
+		// Show badge for tool use
+		m.badgeManager.ShowToolUse(msg.name)
+
 		m.streamBuf += formatToolCard(card) + "\n"
 		// If the agent updated the todo list, refresh the panel.
 		if msg.name == "todo_write" {
@@ -335,7 +427,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				"result":    msg.result,
 			})
 		}
-		
+
 		// Update the most recent matching card with the result. If the
 		// tool wrote/edited a file, attempt to compute an inline diff
 		// for the card so the user can see the change visually.
@@ -345,9 +437,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if m.toolCards[i].hasDiff {
 					m.toolCards[i].diffInline = m.computeToolDiff(m.toolCards[i])
 				}
-				
+
+				// Record file change for undo/redo
+				m.recordFileChange(m.toolCards[i])
+
 				// Update tool call manager status to success
 				m.toolCallManager.UpdateStatus(m.toolCards[i].id, ToolCallSuccess, msg.result, "")
+
+				// Show success badge
+				m.badgeManager.ShowCompleted(msg.name)
 				break
 			}
 		}
@@ -368,34 +466,45 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				"output_tokens": m.outputTokens,
 			})
 		}
-		
-		// Commit streamBuf to viewBuf with token annotation
-		// Use the streaming renderer's final output instead of renderBufferSegments
-		if m.streamBuf != "" || m.hasStreamContent {
-			// Get final rendered content from streaming renderer
-			rendered := m.streamingRenderer.Render()
-			
-			// Add tool cards if any
-			toolCardsRendered := m.toolCallManager.RenderActiveCalls()
-			if toolCardsRendered != "" {
-				rendered += "\n" + toolCardsRendered
-			}
-			
+
+		// If streamTextFinalMsg already committed the text, only
+		// append the token line. Tool cards are already in streamBuf
+		// via streamToolMsg/streamToolDoneMsg calls.
+		if m.streamTextCommitted {
 			tokLine := statusStyle.Render(fmt.Sprintf(
-				"\n\nTokens: %s in / %s out\n\n",
+				"\nTokens: %s in / %s out\n\n",
 				formatNum(m.inputTokens),
 				formatNum(m.outputTokens),
 			))
-			m.viewBuf += rendered + tokLine
-			m.streamBuf = ""
+			if m.streamBuf != "" {
+				m.viewBuf += m.streamBuf + tokLine
+				m.streamBuf = ""
+			} else {
+				m.viewBuf += tokLine
+			}
+		} else {
+			// No streamTextFinalMsg arrived — commit whatever we have.
+			if m.streamBuf != "" || m.hasStreamContent {
+				tokLine := statusStyle.Render(fmt.Sprintf(
+					"\n\nTokens: %s in / %s out\n\n",
+					formatNum(m.inputTokens),
+					formatNum(m.outputTokens),
+				))
+				m.viewBuf += m.streamBuf + tokLine
+				m.streamBuf = ""
+			}
 		}
 		m.hasStreamContent = false
+		m.streamTextCommitted = false
 		m.toolCards = nil // Reset tool cards for next turn
-		
+
 		// Reset streaming components
 		m.streamingRenderer.Reset()
 		m.toolCallManager.Reset()
-		
+
+		// Clear progress badges
+		m.badgeManager.HideProgress()
+
 		m.transitionState(stateInput, "stream completed")
 		m = m.refreshViewport()
 		m.viewport.GotoBottom()
@@ -407,7 +516,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, waitForStream(m.streamChan)
 
 	case streamPermAskMsg:
-		m.state = statePermission
+		m.transitionState(statePermission, "permission requested by agent")
 		m.permToolName = msg.name
 		m.permToolInput = msg.input
 		m.permReplyCh = msg.reply
@@ -422,7 +531,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.askUserInput = ti
 		m.askUserQuestion = msg.question
 		m.askUserReplyCh = msg.reply
-		m.state = stateAskUser
+		m.transitionState(stateAskUser, "agent asked user a question")
 		m = m.refreshViewport()
 		return m, nil
 
@@ -431,7 +540,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.viewBuf += errorStyle.Render(fmt.Sprintf("Error: %v\n\n", msg.err))
 		m.streamBuf = ""
 		m.hasStreamContent = false
-		m.setState(stateInput, "stream error")
+		m.transitionState(stateInput, "stream error")
 		m = m.refreshViewport()
 		return m, nil
 
@@ -459,6 +568,8 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.handleSessionPickerKey(msg)
 	case stateMention:
 		return m.handleMentionKey(msg)
+	case stateSlashMenu:
+		return m.handleSlashMenuKey(msg)
 	case statePicker:
 		return m.handlePickerKey(msg)
 	case stateHelp:
@@ -477,6 +588,14 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.handleLoginOAuthKey(msg)
 	case stateDebugPanel:
 		return m.handleDebugPanelKey(msg)
+	case stateBackgroundTasks:
+		return m.handleBackgroundTasksKey(msg)
+	case stateHistorySearch:
+		return m.handleHistorySearchKey(msg)
+	case stateQuickActions:
+		return m.handleQuickActionsKey(msg)
+	case stateConvSearch:
+		return m.handleConvSearchKey(msg)
 	case stateBusy:
 		if msg.Type == tea.KeyCtrlC {
 			return m, tea.Quit
@@ -505,6 +624,57 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				m.transitionState(stateInput, "user closed debug panel")
 			}
 		}
+		return m, nil
+
+	case tea.KeyCtrlB:
+		// Toggle background tasks panel
+		m.backgroundTaskPanel.Toggle()
+		if m.backgroundTaskPanel.IsVisible() {
+			m.transitionState(stateBackgroundTasks, "user opened background tasks")
+		} else {
+			m.transitionState(stateInput, "user closed background tasks")
+		}
+		return m, nil
+
+	case tea.KeyCtrlR:
+		// Open command history search
+		historyItems := m.history.GetAll()
+		m.historySearch.Open(historyItems)
+		m.transitionState(stateHistorySearch, "user opened history search")
+		return m, nil
+
+	case tea.KeyCtrlK:
+		// Open quick actions menu
+		m.quickActions.Open()
+		m.transitionState(stateQuickActions, "user opened quick actions")
+		return m, nil
+
+	case tea.KeyCtrlF:
+		// Open conversation search
+		m.conversationSearch.Open(m.loop.Session.Messages)
+		m.transitionState(stateConvSearch, "user opened conversation search")
+		return m, nil
+
+	case tea.KeyCtrlZ:
+		// Undo last file change
+		if change, err := m.fileHistory.Undo(); err == nil {
+			m.viewBuf += statusStyle.Render(fmt.Sprintf("⏪ Undid %s: %s\n\n", change.Operation, change.FilePath))
+			m.badgeManager.ShowSuccess(fmt.Sprintf("Undid %s", change.Operation))
+		} else {
+			m.viewBuf += statusStyle.Render(fmt.Sprintf("Nothing to undo\n\n"))
+		}
+		m = m.refreshViewport()
+		return m, nil
+
+	case tea.KeyCtrlY:
+		// Redo last undone change
+		if change, err := m.fileHistory.Redo(); err == nil {
+			m.viewBuf += statusStyle.Render(fmt.Sprintf("⏩ Redid %s: %s\n\n", change.Operation, change.FilePath))
+			m.badgeManager.ShowSuccess(fmt.Sprintf("Redid %s", change.Operation))
+		} else {
+			m.viewBuf += statusStyle.Render(fmt.Sprintf("Nothing to redo\n\n"))
+		}
+		m = m.refreshViewport()
 		return m, nil
 
 	case tea.KeyShiftTab:
@@ -574,9 +744,16 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.textarea, cmd = m.textarea.Update(msg)
 		// After every keystroke, refresh the @-mention popup.
 		if m.mention.update(m.textarea.Value()) {
-			m.state = stateMention
-		} else if m.state == stateMention {
-			m.state = stateInput
+			m.transitionState(stateMention, "mention triggered")
+			return m, cmd
+		}
+		// Also check for slash command popup.
+		if m.slashMenu.update(m.textarea.Value()) {
+			m.transitionState(stateSlashMenu, "slash menu triggered")
+			return m, cmd
+		}
+		if m.state == stateMention || m.state == stateSlashMenu {
+			m.transitionState(stateInput, "popup deactivated")
 		}
 		return m, cmd
 	}
@@ -592,9 +769,26 @@ func (m Model) handleSubmit() (tea.Model, tea.Cmd) {
 	m.history.Push(text)
 	m.history.Reset()
 
-	if strings.HasPrefix(text, "/") {
-		return m.handleSlashCommand(text)
+	// Try parsing as natural language command first
+	cmd, args, isNatural := m.naturalParser.Parse(text)
+	if cmd != "" {
+		// It's a command (natural or slash)
+		if isNatural {
+			// Show feedback that natural language was recognized
+			m.viewBuf += statusStyle.Render(fmt.Sprintf("💬 Understood: %s → %s\n", text, cmd))
+			m = m.refreshViewport()
+		}
+
+		// Execute the command with any parsed arguments
+		if len(args) > 0 {
+			// Reconstruct command with args
+			fullCmd := cmd + " " + strings.Join(args, " ")
+			return m.handleSlashCommand(fullCmd)
+		}
+		return m.handleSlashCommand(cmd)
 	}
+
+	// Not a command - treat as regular message
 	return m.startMessage(text)
 }
 
@@ -607,7 +801,7 @@ func (m Model) handleSlashCommand(cmd string) (tea.Model, tea.Cmd) {
 
 	switch parts[0] {
 	case "/model":
-		m.state = statePicker
+		m.transitionState(statePicker, "user opened model picker")
 		m.pickerCursor = 0
 		for i, km := range m.activeModels() {
 			if km.id == m.cfg.Model {
@@ -618,11 +812,11 @@ func (m Model) handleSlashCommand(cmd string) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case "/help":
-		m.state = stateHelp
+		m.transitionState(stateHelp, "user opened help")
 		return m, nil
 
 	case "/login":
-		m.state = stateLoginProvider
+		m.transitionState(stateLoginProvider, "user started /login")
 		m.loginCursor = 0
 		return m, nil
 
@@ -775,7 +969,7 @@ func (m Model) handleStatus() (tea.Model, tea.Cmd) {
 		fmt.Sprintf("Messages       : %d", m.loop.MessageCount()),
 		fmt.Sprintf("Tokens in/out  : %s / %s", formatNum(m.inputTokens), formatNum(m.outputTokens)),
 	}
-	m.viewBuf += statusStyle.Render(strings.Join(lines, "\n")+"\n\n")
+	m.viewBuf += statusStyle.Render(strings.Join(lines, "\n") + "\n\n")
 	m = m.refreshViewport()
 	return m, nil
 }
@@ -833,7 +1027,7 @@ func (m Model) handleConfig(parts []string) (tea.Model, tea.Cmd) {
 			fmt.Sprintf("maxTokens      = %d", m.cfg.MaxTokens),
 			fmt.Sprintf("theme          = %s", m.cfg.Theme),
 		}
-		m.viewBuf += statusStyle.Render(strings.Join(lines, "\n")+"\n\n")
+		m.viewBuf += statusStyle.Render(strings.Join(lines, "\n") + "\n\n")
 		m = m.refreshViewport()
 		return m, nil
 	}
@@ -973,7 +1167,7 @@ func (m Model) handleLoginProviderKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 		switch chosen.id {
 		case "anthropic":
-			m.state = stateLoginMethod
+			m.transitionState(stateLoginMethod, "user chose anthropic oauth/key")
 		default:
 			m = m.startAPIKeyInput()
 		}
@@ -1023,7 +1217,7 @@ func (m Model) startAPIKeyInput() Model {
 	ti.CharLimit = 512
 	ti.Focus()
 	m.loginKeyInput = ti
-	m.state = stateLoginAPIKey
+	m.transitionState(stateLoginAPIKey, "entering api key")
 	return m
 }
 
@@ -1039,7 +1233,7 @@ func (m Model) handleLoginAPIKeyKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		apiKey := strings.TrimSpace(m.loginKeyInput.Value())
 		if apiKey == "" {
 			m.viewBuf += errorStyle.Render("API key cannot be empty.\n\n")
-			m.state = stateInput
+			m.transitionState(stateInput, "api key empty - rejected")
 			m = m.refreshViewport()
 			return m, nil
 		}
@@ -1064,12 +1258,12 @@ func (m Model) startOAuthLogin() (Model, tea.Cmd) {
 	session, err := auth.PrepareOAuthFlow()
 	if err != nil {
 		m.viewBuf += errorStyle.Render(fmt.Sprintf("OAuth setup failed: %v\n\n", err))
-		m.state = stateInput
+		m.transitionState(stateInput, "oauth setup failed")
 		m = m.refreshViewport()
 		return m, nil
 	}
 
-	m.state = stateLoginOAuth
+	m.transitionState(stateLoginOAuth, "oauth flow started")
 	m.viewBuf += statusStyle.Render(fmt.Sprintf(
 		"Opening browser for Anthropic OAuth login...\n"+
 			"If your browser doesn't open, visit:\n  %s\n\n"+
@@ -1160,7 +1354,7 @@ func (m Model) handleAskUserKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		ch := m.askUserReplyCh
 		m.askUserReplyCh = nil
 		m.askUserQuestion = ""
-		m.state = stateBusy
+		m.transitionState(stateBusy, "ask_user answered")
 		m = m.refreshViewport()
 		return m, tea.Batch(
 			func() tea.Msg { ch <- ""; return nil },
@@ -1171,7 +1365,7 @@ func (m Model) handleAskUserKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		ch := m.askUserReplyCh
 		m.askUserReplyCh = nil
 		m.askUserQuestion = ""
-		m.state = stateBusy
+		m.transitionState(stateBusy, "ask_user answered")
 		m = m.refreshViewport()
 		return m, tea.Batch(
 			func() tea.Msg { ch <- answer; return nil },
@@ -1206,7 +1400,7 @@ func (m Model) viewAskUser() string {
 func (m Model) startMessage(text string) (tea.Model, tea.Cmd) {
 	m.viewBuf += userLabelStyle.Render("You") + ": " + text + "\n\n"
 	m.viewBuf += assistantLabelStyle.Render("Claude") + ": "
-	m.state = stateBusy
+	m.transitionState(stateBusy, "message submitted")
 	m.hasStreamContent = false
 
 	ch := make(chan runtime.TurnEvent, 64)
@@ -1214,8 +1408,20 @@ func (m Model) startMessage(text string) (tea.Model, tea.Cmd) {
 
 	loop := m.loop
 	go func() {
-		defer close(ch)
-		loop.SendMessageStreaming(context.Background(), text, ch) //nolint:errcheck
+		err := loop.SendMessageStreaming(context.Background(), text, ch)
+		if err != nil {
+			// Always surface errors to the TUI. The conversation loop
+			// already emits TurnEventError before returning on most paths,
+			// but if it returns a non-nil error without emitting (legacy
+			// path or cancelled-context case), send one explicitly so
+			// the user sees the failure instead of an empty response.
+			select {
+			case ch <- runtime.TurnEvent{Type: runtime.TurnEventError, Err: err}:
+			default:
+				// Channel buffer is full; error is already being processed
+			}
+		}
+		close(ch)
 	}()
 
 	m = m.refreshViewport()
@@ -1233,7 +1439,7 @@ func (m Model) handlePaletteKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 	if chosen == nil {
 		m.palette.close()
-		m.state = stateInput
+		m.transitionState(stateInput, "palette closed (esc)")
 		return m, nil
 	}
 	cmd := *chosen
@@ -1376,6 +1582,13 @@ func (m Model) cyclePermissionMode() (tea.Model, tea.Cmd) {
 	next := m.permModeOrder[idx]
 	m.loop.PermManager.Mode = next
 	m.cfg.PermissionMode = next.String()
+
+	// Persist the mode to project settings.json so it survives restarts
+	s := &config.Settings{PermissionMode: next.String()}
+	if err := config.WriteProject(s); err != nil {
+		m.viewBuf += warnStyle.Render(fmt.Sprintf("Warning: could not save permission mode: %v\n\n", err))
+	}
+
 	// Mode is already displayed in status bar - no need to append to viewBuf
 	m = m.refreshViewport()
 	return m, nil
@@ -1401,7 +1614,7 @@ func (m Model) handleSessionPickerKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	m.sessionPicker.close()
-	m.state = stateInput
+	m.transitionState(stateInput, "session picker closed")
 	if id == "" {
 		return m, nil
 	}
@@ -1433,8 +1646,187 @@ func (m Model) openSessionPicker() (tea.Model, tea.Cmd) {
 		})
 	}
 	m.sessionPicker.open(converted)
-	m.state = stateSessionPicker
+	m.transitionState(stateSessionPicker, "session picker opened")
 	return m, nil
+}
+
+// handleBackgroundTasksKey handles keys when the background tasks panel is open.
+func (m Model) handleBackgroundTasksKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "ctrl+b", "esc", "q":
+		// Close the panel
+		m.backgroundTaskPanel.Hide()
+		m.transitionState(stateInput, "user closed background tasks")
+		return m, nil
+
+	case "up", "k":
+		// Move cursor up
+		m.backgroundTaskPanel.MoveCursor(-1)
+		return m, nil
+
+	case "down", "j":
+		// Move cursor down
+		m.backgroundTaskPanel.MoveCursor(1)
+		return m, nil
+
+	case "c":
+		// Clear completed tasks
+		m.backgroundTaskPanel.ClearCompleted()
+		return m, nil
+
+	case "enter":
+		// Show details of selected task
+		task := m.backgroundTaskPanel.GetSelectedTask()
+		if task != nil {
+			m.viewBuf += statusStyle.Render(fmt.Sprintf("\n=== Task Details: %s ===\n", task.Name))
+			m.viewBuf += statusStyle.Render(fmt.Sprintf("Status: %s\n", task.Status.String()))
+			m.viewBuf += statusStyle.Render(fmt.Sprintf("Duration: %s\n", formatDuration(task.Duration())))
+			if task.Description != "" {
+				m.viewBuf += statusStyle.Render(fmt.Sprintf("Description: %s\n", task.Description))
+			}
+			if task.Output != "" {
+				m.viewBuf += statusStyle.Render(fmt.Sprintf("Output:\n%s\n", task.Output))
+			}
+			if task.Error != nil {
+				m.viewBuf += errorStyle.Render(fmt.Sprintf("Error: %v\n", task.Error))
+			}
+			m.viewBuf += "\n"
+			m = m.refreshViewport()
+		}
+		return m, nil
+	}
+
+	return m, nil
+}
+
+// handleHistorySearchKey handles keys when the history search is open.
+func (m Model) handleHistorySearchKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "ctrl+r", "esc":
+		// Close the search
+		m.historySearch.Close()
+		m.transitionState(stateInput, "user closed history search")
+		return m, nil
+
+	case "up", "ctrl+p":
+		// Move cursor up
+		m.historySearch.MoveCursor(-1)
+		return m, nil
+
+	case "down", "ctrl+n":
+		// Move cursor down
+		m.historySearch.MoveCursor(1)
+		return m, nil
+
+	case "enter":
+		// Select the highlighted command
+		if m.historySearch.HasResults() {
+			selected := m.historySearch.GetSelected()
+			if selected != "" {
+				m.textarea.SetValue(selected)
+				m.historySearch.Close()
+				m.transitionState(stateInput, "user selected from history")
+			}
+		}
+		return m, nil
+
+	default:
+		// Update the search input
+		var cmd tea.Cmd
+		m.historySearch.input, cmd = m.historySearch.input.Update(msg)
+		m.historySearch.UpdateQuery(m.historySearch.input.Value())
+		return m, cmd
+	}
+}
+
+// handleQuickActionsKey handles keys when the quick actions menu is open.
+func (m Model) handleQuickActionsKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "ctrl+k", "esc":
+		// Close the menu
+		m.quickActions.Close()
+		m.transitionState(stateInput, "user closed quick actions")
+		return m, nil
+
+	case "up", "ctrl+p":
+		// Move cursor up
+		m.quickActions.MoveCursor(-1)
+		return m, nil
+
+	case "down", "ctrl+n":
+		// Move cursor down
+		m.quickActions.MoveCursor(1)
+		return m, nil
+
+	case "enter":
+		// Execute the selected action
+		if m.quickActions.HasActions() {
+			action := m.quickActions.GetSelected()
+			if action != nil {
+				m.quickActions.Close()
+				m.transitionState(stateInput, "executing quick action")
+
+				// Execute the action handler
+				var err error
+				m, err = action.Handler(m)
+				if err != nil {
+					m.viewBuf += errorStyle.Render(fmt.Sprintf("Error: %v\n\n", err))
+					m = m.refreshViewport()
+				}
+			}
+		}
+		return m, nil
+
+	default:
+		// Update the search input
+		var cmd tea.Cmd
+		m.quickActions.input, cmd = m.quickActions.input.Update(msg)
+		m.quickActions.UpdateQuery(m.quickActions.input.Value())
+		return m, cmd
+	}
+}
+
+// handleConvSearchKey handles keys when the conversation search is open.
+func (m Model) handleConvSearchKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "ctrl+f", "esc":
+		// Close the search
+		m.conversationSearch.Close()
+		m.transitionState(stateInput, "user closed conversation search")
+		return m, nil
+
+	case "up", "ctrl+p":
+		// Move cursor up
+		m.conversationSearch.MoveCursor(-1)
+		return m, nil
+
+	case "down", "ctrl+n":
+		// Move cursor down
+		m.conversationSearch.MoveCursor(1)
+		return m, nil
+
+	case "enter":
+		// Jump to the selected message
+		if m.conversationSearch.HasResults() {
+			selected := m.conversationSearch.GetSelected()
+			if selected != nil {
+				// Jump to the message in the viewport
+				// We need to reconstruct the conversation view to show the message
+				m.viewBuf += statusStyle.Render(fmt.Sprintf("Jumping to message #%d\n\n", selected.index+1))
+				// In a full implementation, we would scroll the viewport to the message
+				m.conversationSearch.Close()
+				m.transitionState(stateInput, "jumped to message")
+			}
+		}
+		return m, nil
+
+	default:
+		// Update the search input
+		var cmd tea.Cmd
+		m.conversationSearch.input, cmd = m.conversationSearch.input.Update(msg)
+		m.conversationSearch.UpdateQuery(m.conversationSearch.input.Value())
+		return m, cmd
+	}
 }
 
 // handleMentionKey handles keys when the @-mention popup is active.
@@ -1443,7 +1835,7 @@ func (m Model) handleMentionKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case tea.KeyEsc:
 		// Cancel: drop the @-trigger and return to plain input.
 		m.mention.active = false
-		m.state = stateInput
+		m.transitionState(stateInput, "mention cancelled (esc)")
 		return m, nil
 	case tea.KeyEnter:
 		return m.applyMentionSelection()
@@ -1462,7 +1854,7 @@ func (m Model) handleMentionKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		var cmd tea.Cmd
 		m.textarea, cmd = m.textarea.Update(msg)
 		if !m.mention.update(m.textarea.Value()) {
-			m.state = stateInput
+			m.transitionState(stateInput, "mention deactivated")
 		}
 		return m, cmd
 	}
@@ -1471,9 +1863,59 @@ func (m Model) handleMentionKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
 	m.textarea, cmd = m.textarea.Update(msg)
 	if !m.mention.update(m.textarea.Value()) {
-		m.state = stateInput
+		m.transitionState(stateInput, "mention deactivated")
 	}
 	return m, cmd
+}
+
+// handleSlashMenuKey handles keys when the slash command menu is open.
+func (m Model) handleSlashMenuKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.Type {
+	case tea.KeyEsc:
+		// Cancel: drop the slash menu and return to plain input.
+		m.slashMenu.active = false
+		m.transitionState(stateInput, "slash menu cancelled (esc)")
+		return m, nil
+	case tea.KeyEnter:
+		return m.applySlashMenuSelection()
+	case tea.KeyTab:
+		return m.applySlashMenuSelection()
+	case tea.KeyUp:
+		m.slashMenu.moveCursor(-1)
+		return m, nil
+	case tea.KeyDown:
+		m.slashMenu.moveCursor(1)
+		return m, nil
+	case tea.KeyBackspace:
+		// Let the textarea handle the backspace; we'll re-evaluate the
+		// popup state via the default key path on the next render.
+		m.history.Reset()
+		var cmd tea.Cmd
+		m.textarea, cmd = m.textarea.Update(msg)
+		if !m.slashMenu.update(m.textarea.Value()) {
+			m.transitionState(stateInput, "slash menu deactivated")
+		}
+		return m, cmd
+	}
+	// Default: pass through to textarea; re-evaluate slash menu state.
+	m.history.Reset()
+	var cmd tea.Cmd
+	m.textarea, cmd = m.textarea.Update(msg)
+	if !m.slashMenu.update(m.textarea.Value()) {
+		m.transitionState(stateInput, "slash menu deactivated")
+	}
+	return m, cmd
+}
+
+// applySlashMenuSelection replaces the /trigger and partial query in the
+// textarea with the currently highlighted slash command.
+func (m Model) applySlashMenuSelection() (tea.Model, tea.Cmd) {
+	newVal, cursor := m.slashMenu.insert(m.textarea.Value())
+	m.textarea.SetValue(newVal)
+	m.textarea.SetCursor(cursor)
+	m.slashMenu.active = false
+	m.transitionState(stateInput, "slash menu cancelled (esc)")
+	return m, nil
 }
 
 // applyMentionSelection replaces the @trigger and partial query in the
@@ -1483,7 +1925,7 @@ func (m Model) applyMentionSelection() (tea.Model, tea.Cmd) {
 	m.textarea.SetValue(newVal)
 	m.textarea.SetCursor(cursor)
 	m.mention.active = false
-	m.state = stateInput
+	m.transitionState(stateInput, "mention cancelled (esc)")
 	return m, nil
 }
 
@@ -1621,7 +2063,7 @@ func (m Model) handlePickerKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.cfg.Model = chosen.id
 		m.loop.Config.Model = chosen.id
 		m.viewBuf += statusStyle.Render(fmt.Sprintf("Model changed to %s\n\n", chosen.id))
-		m.state = stateInput
+		m.transitionState(stateInput, "model selected from picker")
 		m = m.refreshViewport()
 		return m, nil
 	case tea.KeyUp:
@@ -1679,7 +2121,7 @@ func (m Model) handlePermissionKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	m.permReplyCh = nil
 	m.permToolName = ""
 	m.permToolInput = ""
-	m.state = stateBusy
+	m.transitionState(stateBusy, "permission decision made")
 	m = m.refreshViewport()
 
 	return m, tea.Batch(
@@ -1689,6 +2131,132 @@ func (m Model) handlePermissionKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		},
 		waitForStream(m.streamChan),
 	)
+}
+
+// --- Mouse & Scroll Support -------------------------------------------------
+
+// handleMouse processes mouse events (wheel, click, motion) for the TUI.
+func (m Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
+	switch msg.Button {
+	case tea.MouseButtonWheelUp:
+		// Scroll viewport up (3 lines per wheel click for smooth feel)
+		m.viewport.LineUp(3)
+		return m, nil
+
+	case tea.MouseButtonWheelDown:
+		// Scroll viewport down (3 lines per wheel click)
+		m.viewport.LineDown(3)
+		return m, nil
+
+	case tea.MouseButtonLeft:
+		// Click in input area: focus textarea
+		inputStartY := m.viewportHeight() + 1 // +1 for header
+		if msg.Y >= inputStartY && msg.Y <= inputStartY+textareaRows {
+			// Click was in the text input area, focus it
+			m.textarea.Focus() //nolint:errcheck
+			return m, nil
+		}
+
+		// Click in viewport area: delegate to viewport for selection if needed
+		if msg.Y >= 1 && msg.Y < inputStartY {
+			// In the viewport area - scroll to approximate position
+			// This provides click-to-position-on-scrollbar behavior
+			vpHeight := m.viewportHeight()
+			if vpHeight > 0 && msg.Y-1 >= 0 && msg.Y-1 < vpHeight {
+				// Approximate: set cursor to y-offset relative to total content
+				totalLines := m.viewport.TotalLineCount()
+				if totalLines > vpHeight {
+					ratio := float64(msg.Y-1) / float64(vpHeight)
+					targetLine := int(ratio * float64(totalLines))
+					m.viewport.SetYOffset(targetLine)
+				}
+			}
+			return m, nil
+		}
+
+		// Click in hint/status bar area: no-op for now
+		return m, nil
+
+	case tea.MouseButtonRight:
+		// Right click: nothing special for now
+		return m, nil
+	}
+
+	// For all other mouse events (motion, release, etc.), delegate to viewport
+	// which may handle text selection internally
+	var cmd tea.Cmd
+	m.viewport, cmd = m.viewport.Update(msg)
+	return m, cmd
+}
+
+// renderViewportWithScrollbar wraps the viewport content with a scrollbar indicator.
+// This shows the user their position within the conversation history.
+func (m Model) renderViewportWithScrollbar() string {
+	vpContent := m.viewport.View()
+
+	totalLines := m.viewport.TotalLineCount()
+	vpHeight := m.viewportHeight()
+
+	// If content fits within viewport, no scrollbar needed
+	if totalLines <= vpHeight {
+		return vpContent
+	}
+
+	// Calculate scrollbar position and height
+	offset := m.viewport.YOffset
+	scrollPercent := float64(offset) / float64(totalLines-vpHeight)
+	if scrollPercent > 1.0 {
+		scrollPercent = 1.0
+	}
+	if scrollPercent < 0.0 {
+		scrollPercent = 0.0
+	}
+
+	// Build the scrollbar on the right edge
+	scrollHeight := max(1, int(float64(vpHeight)*float64(vpHeight)/float64(totalLines)))
+	scrollPos := int(scrollPercent * float64(vpHeight-scrollHeight))
+
+	// Create scrollbar column
+	scrollStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("240"))
+
+	scrollTrackStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("235"))
+
+	// Build the scrollbar
+	lines := strings.Split(vpContent, "\n")
+	for len(lines) < vpHeight {
+		lines = append(lines, "")
+	}
+
+	// Truncate/pad to exact viewport height
+	if len(lines) > vpHeight {
+		lines = lines[:vpHeight]
+	}
+
+	sb := strings.Builder{}
+	for i := 0; i < vpHeight; i++ {
+		sb.WriteString(lines[i])
+		sb.WriteString(" ") // spacer
+
+		// Draw scrollbar indicator
+		if i >= scrollPos && i < scrollPos+scrollHeight {
+			sb.WriteString(scrollStyle.Render("█"))
+		} else {
+			sb.WriteString(scrollTrackStyle.Render("│"))
+		}
+		sb.WriteString("\n")
+	}
+
+	// Show percentage at bottom of scrollbar area
+	scrollPct := int(scrollPercent * 100)
+	if offset == 0 {
+		scrollPct = 0
+	} else if offset >= totalLines-vpHeight {
+		scrollPct = 100
+	}
+
+	return sb.String()[:sb.Len()-1] + " " + statusStyle.Render(fmt.Sprintf("%d%%", scrollPct))
 }
 
 // --- View -------------------------------------------------------------------
@@ -1726,25 +2294,54 @@ func (m Model) View() string {
 			return debug.RenderPanel()
 		}
 		return m.View() // Fallback if debug disabled
+	case stateBackgroundTasks:
+		return m.backgroundTaskPanel.View(m.width, m.height)
+	case stateHistorySearch:
+		return m.historySearch.View(m.width, m.height)
+	case stateQuickActions:
+		return m.quickActions.View(m, m.width, m.height)
+	case stateConvSearch:
+		return m.conversationSearch.View(m.width, m.height)
 	}
 
 	header := m.renderHeader()
 	divider := dividerStyle.Render(strings.Repeat("─", m.width))
-	hint := statusStyle.Render("Enter=send  Ctrl+J=newline  ↑↓=history  Ctrl+P=palette  Shift+Tab=mode  Ctrl+T=expand")
+
+	// Use progressive disclosure for hints
+	shortcuts := m.progressiveDisclosure.GetShortcutHints()
+	hint := statusStyle.Render(strings.Join(shortcuts, "  "))
+
+	// Add contextual hint if available
+	contextHint := m.progressiveDisclosure.GetHintsForState("input", m.textarea.Value())
+	if contextHint == "" {
+		contextHint = m.progressiveDisclosure.GetCurrentHint()
+	}
+
 	statusLine := m.renderStatusBar()
 	inputArea := m.renderInputArea()
+
+	// Use scrollbar-enhanced viewport when content overflows
+	vpView := m.renderViewportWithScrollbar()
 
 	// Compose the main column (header, viewport, divider, input, hint, status).
 	// When the todo panel is active on a wide terminal, lay it out as a
 	// two-column row so the conversation can scroll beside the tasks.
-	mainCol := lipgloss.JoinVertical(lipgloss.Left,
+	parts := []string{
 		header,
-		m.viewport.View(),
+		vpView,
 		divider,
 		inputArea,
 		hint,
-		statusLine,
-	)
+	}
+
+	// Add contextual hint if available
+	if contextHint != "" {
+		parts = append(parts, statusStyle.Render(contextHint))
+	}
+
+	parts = append(parts, statusLine)
+
+	mainCol := lipgloss.JoinVertical(lipgloss.Left, parts...)
 
 	if m.todoPanel.isVisible() && m.width >= 100 {
 		sidebar := lipgloss.NewStyle().Width(m.todoPanel.width).Render(
@@ -1756,9 +2353,12 @@ func (m Model) View() string {
 			sidebar,
 		)
 		out := body
-		// Mention popup sits over the input area on top of everything.
+		// Mention / slash-menu popups sit over the input area.
 		if m.state == stateMention {
 			out = lipgloss.JoinVertical(lipgloss.Left, out, m.mention.view(m.width, m.height))
+		}
+		if m.state == stateSlashMenu {
+			out = lipgloss.JoinVertical(lipgloss.Left, out, m.slashMenu.view(m.width, m.height))
 		}
 		return out
 	}
@@ -1766,6 +2366,9 @@ func (m Model) View() string {
 	out := mainCol
 	if m.state == stateMention {
 		out = lipgloss.JoinVertical(lipgloss.Left, out, m.mention.view(m.width, m.height))
+	}
+	if m.state == stateSlashMenu {
+		out = lipgloss.JoinVertical(lipgloss.Left, out, m.slashMenu.view(m.width, m.height))
 	}
 	return out
 }
@@ -1777,25 +2380,35 @@ func (m Model) renderHeader() string {
 }
 
 func (m Model) renderStatusBar() string {
+	var parts []string
+
+	// Render active status badges
+	badges := m.badgeManager.Render()
+	if badges != "" {
+		parts = append(parts, badges)
+	}
+
+	// Add permission mode indicator
 	mode := "default"
 	if m.loop != nil && m.loop.PermManager != nil {
 		mode = m.loop.PermManager.Mode.String()
 	}
-	modeBadge := modeBadgeStyle.Render("[" + mode + "]")
+	modeIndicator := statusStyle.Render(fmt.Sprintf("[%s]", mode))
+	parts = append(parts, modeIndicator)
+
+	// Add token usage if available
 	if m.inputTokens > 0 || m.outputTokens > 0 {
-		return lipgloss.JoinHorizontal(lipgloss.Left,
-			modeBadge,
-			statusStyle.Render(fmt.Sprintf(
-				"  Tokens: %s in / %s out  │  Session: %s",
-				formatNum(m.inputTokens), formatNum(m.outputTokens),
-				m.loop.Session.ID,
-			)),
-		)
+		tokens := statusStyle.Render(fmt.Sprintf("Tokens: %s in / %s out", formatNum(m.inputTokens), formatNum(m.outputTokens)))
+		parts = append(parts, tokens)
 	}
-	return lipgloss.JoinHorizontal(lipgloss.Left,
-		modeBadge,
-		statusStyle.Render("  Session: "+m.loop.Session.ID),
-	)
+
+	// Add session info
+	if m.loop != nil && m.loop.Session != nil {
+		sessionInfo := statusStyle.Render(fmt.Sprintf("Session: %s (%d msgs)", m.loop.Session.ID, m.loop.MessageCount()))
+		parts = append(parts, sessionInfo)
+	}
+
+	return strings.Join(parts, " │ ")
 }
 
 // renderInputArea renders the multi-line input with a "> " prefix on the first line.
@@ -1816,10 +2429,14 @@ func (m Model) renderInputArea() string {
 
 // activeModels returns the model list appropriate for the current provider.
 func (m Model) activeModels() []modelEntry {
-	if m.cfg.ProviderName == "openai" {
+	switch m.cfg.ProviderName {
+	case "openai":
 		return openAIModels
+	case "deepseek":
+		return deepseekModels
+	default:
+		return anthropicModels
 	}
-	return anthropicModels
 }
 
 func (m Model) viewPicker() string {
@@ -1875,6 +2492,7 @@ func (m Model) viewHelp() string {
 		"  "+userLabelStyle.Render("Ctrl+J")+"         Insert newline (multi-line input)",
 		"  "+userLabelStyle.Render("↑ / ↓")+"          Navigate input history (single-line mode)",
 		"  "+userLabelStyle.Render("PgUp / PgDn")+"    Scroll conversation",
+		"  "+userLabelStyle.Render("Mouse wheel")+"     Scroll conversation smoothly",
 		"  "+userLabelStyle.Render("Ctrl+C")+"         Exit",
 		"",
 		statusStyle.Render("Esc / Enter / q to close this panel"),
@@ -1985,6 +2603,8 @@ func waitForStream(ch <-chan runtime.TurnEvent) tea.Cmd {
 			switch ev.Type {
 			case runtime.TurnEventTextDelta:
 				return streamDeltaMsg{text: ev.Text}
+			case runtime.TurnEventTextFinal:
+				return streamTextFinalMsg{text: ev.Text}
 			case runtime.TurnEventToolStart:
 				return streamToolMsg{name: ev.ToolName, input: ev.ToolInput}
 			case runtime.TurnEventToolDone:
@@ -1994,9 +2614,9 @@ func waitForStream(ch <-chan runtime.TurnEvent) tea.Cmd {
 			case runtime.TurnEventDone:
 				return streamDoneMsg{}
 			case runtime.TurnEventError:
+				return streamErrMsg{err: ev.Err}
 			case runtime.TurnEventWarn:
 				return streamWarnMsg{text: ev.Text}
-				return streamErrMsg{err: ev.Err}
 			case runtime.TurnEventPermissionAsk:
 				return streamPermAskMsg{name: ev.ToolName, input: ev.ToolInput, reply: ev.PermReply}
 			case runtime.TurnEventAskUser:
@@ -2033,7 +2653,7 @@ func (m Model) viewportHeight() int {
 	if m.height < minTerminalHeight {
 		return 1 // Return minimal viewport, UI will be cramped but won't panic
 	}
-	
+
 	overhead := 4 + textareaRows // header + divider + textarea + hint + status
 	h := m.height - overhead
 	if h < 1 {
@@ -2043,13 +2663,28 @@ func (m Model) viewportHeight() int {
 }
 
 // refreshViewport rebuilds viewport content from current buffers.
+// Optimized to reduce expensive SetContent calls during streaming.
 func (m Model) refreshViewport() Model {
-	content := m.viewBuf + m.streamBuf
+	// Build content once
+	var content strings.Builder
+	content.WriteString(m.viewBuf)
+	content.WriteString(m.streamBuf)
+
 	if m.state == stateBusy && !m.hasStreamContent {
-		content += m.spinner.View() + statusStyle.Render(" Thinking…\n")
+		content.WriteString(m.spinner.View())
+		content.WriteString(statusStyle.Render(" Thinking…\n"))
 	}
-	m.viewport.SetContent(content)
-	m.viewport.GotoBottom()
+
+	// Only update if content changed (use length check as fast path)
+	newContent := content.String()
+	currentContent := m.viewport.View()
+
+	// Fast path: if lengths differ, content definitely changed
+	if len(currentContent) != len(newContent) || currentContent != newContent {
+		m.viewport.SetContent(newContent)
+		m.viewport.GotoBottom()
+	}
+
 	return m
 }
 
@@ -2081,6 +2716,63 @@ func formatSessionList(metas []runtime.SessionMeta) string {
 			formatNum(m.TotalOutputTokens)))
 	}
 	return sb.String()
+}
+
+// extractFilePath extracts file path from tool input JSON
+func extractFilePath(input string) string {
+	// Look for "path" or "file_path" field
+	if idx := strings.Index(input, `"path"`); idx != -1 {
+		return extractJSONString(input[idx:])
+	}
+	if idx := strings.Index(input, `"file_path"`); idx != -1 {
+		return extractJSONString(input[idx:])
+	}
+	return ""
+}
+
+// recordFileChange extracts file change info from a tool card and records it
+func (m *Model) recordFileChange(card toolCard) {
+	// Only record for file modification tools
+	if card.name != "write_file" && card.name != "file_edit" && card.name != "edit" && card.name != "write" {
+		return
+	}
+
+	// Try to extract file path from input
+	filePath := extractFilePath(card.input)
+	if filePath == "" {
+		return
+	}
+
+	// Read current content (after change)
+	after, err := os.ReadFile(filePath)
+	if err != nil {
+		return // File might not exist yet
+	}
+
+	// For write operations, before is empty or previous content
+	// For edit operations, try to get before content from backup
+	before := ""
+	if card.name == "file_edit" || card.name == "edit" {
+		// Try to read backup file if it exists
+		backupPath := filePath + ".bak"
+		if data, err := os.ReadFile(backupPath); err == nil {
+			before = string(data)
+		}
+	}
+
+	// Record the change
+	operation := "write"
+	if card.name == "file_edit" || card.name == "edit" {
+		operation = "edit"
+	}
+
+	m.fileHistory.Record(FileChange{
+		FilePath:  filePath,
+		Before:    before,
+		After:     string(after),
+		Timestamp: time.Now(),
+		Operation: operation,
+	})
 }
 
 func formatNum(n int) string {

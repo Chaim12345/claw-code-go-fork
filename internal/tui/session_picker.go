@@ -20,10 +20,10 @@ type sessionPicker struct {
 }
 
 type pickerSession struct {
-	id            string
-	updated       string
-	messageCount  int
-	totalInTokens int
+	id             string
+	updated        string
+	messageCount   int
+	totalInTokens  int
 	totalOutTokens int
 }
 

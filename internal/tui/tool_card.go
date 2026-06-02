@@ -33,18 +33,18 @@ func formatToolCard(c toolCard) string {
 		boxWidth := 80
 		topBorder := toolCardBorderStyle.Render("╭" + strings.Repeat("─", boxWidth-2) + "╮")
 		bottomBorder := toolCardBorderStyle.Render("╰" + strings.Repeat("─", boxWidth-2) + "╯")
-		
+
 		b.WriteString(topBorder + "\n")
-		
+
 		// Header with icon
 		icon := getToolIcon(c.name)
 		header := fmt.Sprintf("│ %s %s", icon, c.name)
 		b.WriteString(toolExpandedHeaderStyle.Render(header))
 		b.WriteString(toolCardBorderStyle.Render(strings.Repeat(" ", boxWidth-len(header)-1) + "│\n"))
-		
+
 		// Separator
 		b.WriteString(toolCardBorderStyle.Render("├" + strings.Repeat("─", boxWidth-2) + "┤\n"))
-		
+
 		// Content
 		if c.hasDiff && c.diffInline != "" {
 			// Show diff in box
@@ -65,7 +65,7 @@ func formatToolCard(c toolCard) string {
 			b.WriteString(toolCardBorderStyle.Render("│ "))
 			b.WriteString(toolSectionStyle.Render("Input:"))
 			b.WriteString(toolCardBorderStyle.Render(strings.Repeat(" ", boxWidth-10) + "│\n"))
-			
+
 			inputLines := formatToolInput(c.input, boxWidth-4)
 			for _, line := range inputLines {
 				b.WriteString(toolCardBorderStyle.Render("│ "))
@@ -77,19 +77,19 @@ func formatToolCard(c toolCard) string {
 				b.WriteString(toolCardBorderStyle.Render("│\n"))
 			}
 		}
-		
+
 		// Result section
 		if c.result != "" {
 			b.WriteString(toolCardBorderStyle.Render("├" + strings.Repeat("─", boxWidth-2) + "┤\n"))
 			b.WriteString(toolCardBorderStyle.Render("│ "))
 			b.WriteString(toolSectionStyle.Render("Result:"))
 			b.WriteString(toolCardBorderStyle.Render(strings.Repeat(" ", boxWidth-11) + "│\n"))
-			
+
 			preview := c.result
 			if len(preview) > 4096 {
 				preview = preview[:4096] + "\n…(truncated)"
 			}
-			
+
 			resultLines := formatToolResult(preview, boxWidth-4)
 			for _, line := range resultLines {
 				b.WriteString(toolCardBorderStyle.Render("│ "))
@@ -101,19 +101,19 @@ func formatToolCard(c toolCard) string {
 				b.WriteString(toolCardBorderStyle.Render("│\n"))
 			}
 		}
-		
+
 		b.WriteString(bottomBorder)
 	} else {
 		// Collapsed view: compact single line with icon and badge
 		icon := getToolIcon(c.name)
 		badge := getToolBadge(c.name)
-		
+
 		summary := truncate(c.input, 50)
 		status := ""
 		if c.result != "" {
 			status = toolSuccessStyle.Render(" ✓")
 		}
-		
+
 		line := fmt.Sprintf("  %s %s %s %s%s", icon, badge, c.name, summary, status)
 		b.WriteString(toolCompactStyle.Render(line))
 	}
@@ -201,16 +201,16 @@ func wrapText(text string, maxWidth int) []string {
 	if text == "" {
 		return []string{"  (empty)"}
 	}
-	
+
 	lines := strings.Split(text, "\n")
 	var result []string
-	
+
 	for _, line := range lines {
 		if len(line) <= maxWidth {
 			result = append(result, "  "+line)
 			continue
 		}
-		
+
 		// Wrap long lines
 		for len(line) > maxWidth {
 			result = append(result, "  "+line[:maxWidth])
@@ -220,7 +220,7 @@ func wrapText(text string, maxWidth int) []string {
 			result = append(result, "  "+line)
 		}
 	}
-	
+
 	return result
 }
 

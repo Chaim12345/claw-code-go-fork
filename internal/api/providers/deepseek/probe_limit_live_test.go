@@ -38,9 +38,9 @@ func TestLiveProbeActualInputLimit(t *testing.T) {
 	cases := []struct {
 		name      string
 		model     string
-		lowOK     int    // size known to succeed (from a prior run, ~100 chars)
-		highFail  int    // size well above /settings limit, must fail
-		settingCh int    // configured input_character_limit from /settings
+		lowOK     int // size known to succeed (from a prior run, ~100 chars)
+		highFail  int // size well above /settings limit, must fail
+		settingCh int // configured input_character_limit from /settings
 	}{
 		{name: "instant", model: "instant", lowOK: 100, highFail: 3_000_000, settingCh: 2_621_440},
 		{name: "expert", model: "expert", lowOK: 100, highFail: 200_000, settingCh: 163_840},

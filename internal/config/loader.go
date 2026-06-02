@@ -9,12 +9,13 @@ import (
 // Settings holds the merged configuration from all settings sources.
 // Fields correspond to JSON keys in .claude/settings.json.
 type Settings struct {
-	Model          string   `json:"model,omitempty"`
-	PermissionMode string   `json:"permissionMode,omitempty"`
-	AllowedTools   []string `json:"allowedTools,omitempty"`
-	BlockedTools   []string `json:"blockedTools,omitempty"`
-	MaxTokens      int      `json:"maxTokens,omitempty"`
-	Theme          string   `json:"theme,omitempty"`
+	Model                    string   `json:"model,omitempty"`
+	PermissionMode           string   `json:"permissionMode,omitempty"`
+	AllowedTools             []string `json:"allowedTools,omitempty"`
+	BlockedTools             []string `json:"blockedTools,omitempty"`
+	MaxTokens                int      `json:"maxTokens,omitempty"`
+	CompactionMaxInputTokens int      `json:"compactionMaxInputTokens,omitempty"`
+	Theme                    string   `json:"theme,omitempty"`
 }
 
 // Load returns merged settings from (in order of increasing precedence):
@@ -69,6 +70,9 @@ func merge(dst, src *Settings) {
 	if src.MaxTokens != 0 {
 		dst.MaxTokens = src.MaxTokens
 	}
+	if src.CompactionMaxInputTokens != 0 {
+		dst.CompactionMaxInputTokens = src.CompactionMaxInputTokens
+	}
 	if src.Theme != "" {
 		dst.Theme = src.Theme
 	}
@@ -111,7 +115,7 @@ func WriteProject(s *Settings) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(filepath.Join(".claude", "settings.json"), data, 0o644)
+	return os.WriteFile(filepath.Join(".claude", "settings.json"), data, 0o600)
 }
 
 // InitProject creates .claude/settings.json with default values.
@@ -122,7 +126,8 @@ func InitProject(model string) error {
 		return os.ErrExist
 	}
 	if model == "" {
-		model = "claude-sonnet-4-20250514"
+		// Default to DeepSeek expert reasoning model when initializing a new project
+		model = "expert"
 	}
 	defaults := &Settings{
 		Model:          model,

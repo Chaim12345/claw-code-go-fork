@@ -9,6 +9,25 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
+// validToolNames is a whitelist of known tool names from the runtime.
+// Keep in sync with the tools registered in internal/runtime/conversation.go
+// and the tool definitions in internal/tools/.
+var validToolNames = map[string]bool{
+	"bash":       true,
+	"read_file":  true,
+	"write_file": true,
+	"glob":       true,
+	"grep":       true,
+	"file_edit":  true,
+	"web_fetch":  true,
+	"web_search": true,
+	"ask_user":   true,
+	"todo_write": true,
+	// Note: "tool_calls" and "invoke" are wrapper tags, not actual tool names.
+	// They are handled separately in removeToolCallXML and are NOT included here
+	// to prevent phantom tool call parsing.
+}
+
 // ToolCallParser extracts and parses tool calls from streaming XML
 type ToolCallParser struct {
 	mu              sync.RWMutex
@@ -57,7 +76,7 @@ func (tcp *ToolCallParser) Feed(text string) []ParsedToolCall {
 	defer tcp.mu.Unlock()
 
 	tcp.buffer.WriteString(text)
-	
+
 	// Try to extract complete tool calls
 	return tcp.extractToolCalls()
 }
@@ -87,9 +106,15 @@ func (tcp *ToolCallParser) extractToolCalls() []ParsedToolCall {
 
 		tagName := content[start+1 : start+tagEnd]
 		tagName = strings.TrimSpace(tagName)
-		
+
 		// Skip if it's a closing tag or parameter tag
 		if strings.HasPrefix(tagName, "/") || strings.Contains(tagName, " ") {
+			content = content[start+tagEnd+1:]
+			continue
+		}
+
+		// Skip if not a valid tool name
+		if !validToolNames[tagName] {
 			content = content[start+tagEnd+1:]
 			continue
 		}
@@ -107,7 +132,7 @@ func (tcp *ToolCallParser) extractToolCalls() []ParsedToolCall {
 
 		// Extract complete tool call XML
 		xmlBlock := content[start : start+closeIdx+len(closingTag)]
-		
+
 		// Parse the tool call
 		if call, err := tcp.parseToolCallXML(xmlBlock); err == nil {
 			newCalls = append(newCalls, call)
@@ -125,7 +150,7 @@ func (tcp *ToolCallParser) extractToolCalls() []ParsedToolCall {
 func (tcp *ToolCallParser) parseToolCallXML(xmlBlock string) (ParsedToolCall, error) {
 	// Simple XML parsing - extract tool name and parameters
 	lines := strings.Split(xmlBlock, "\n")
-	
+
 	var toolName string
 	params := make(map[string]string)
 	var currentParam string
@@ -133,7 +158,7 @@ func (tcp *ToolCallParser) parseToolCallXML(xmlBlock string) (ParsedToolCall, er
 
 	for _, line := range lines {
 		line = strings.TrimSpace(line)
-		
+
 		// Extract tool name from opening tag
 		if strings.HasPrefix(line, "<") && !strings.HasPrefix(line, "</") && toolName == "" {
 			tagEnd := strings.Index(line, ">")
@@ -181,6 +206,11 @@ func (tcp *ToolCallParser) parseToolCallXML(xmlBlock string) (ParsedToolCall, er
 
 	if toolName == "" {
 		return ParsedToolCall{}, fmt.Errorf("no tool name found")
+	}
+
+	// Validate that this is a known tool name
+	if !validToolNames[toolName] {
+		return ParsedToolCall{}, fmt.Errorf("invalid tool name: %s", toolName)
 	}
 
 	return ParsedToolCall{
@@ -236,7 +266,7 @@ func RenderToolCall(call ParsedToolCall, expanded bool) string {
 	// Status icon and color
 	var statusIcon string
 	var statusColor lipgloss.Color
-	
+
 	switch call.Status {
 	case ToolCallPending:
 		statusIcon = "⏳"
@@ -284,14 +314,14 @@ func RenderToolCall(call ParsedToolCall, expanded bool) string {
 	if len(call.Parameters) > 0 {
 		content.WriteString("\n")
 		paramStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
-		
+
 		for key, value := range call.Parameters {
 			// Truncate long values
 			displayValue := value
 			if len(displayValue) > 100 {
 				displayValue = displayValue[:100] + "..."
 			}
-			
+
 			content.WriteString(paramStyle.Render(fmt.Sprintf("  %s: %s\n", key, displayValue)))
 		}
 	}
@@ -360,31 +390,92 @@ func (tcm *ToolCallManager) ProcessStream(text string) string {
 
 	// Remove tool call XML from visible text
 	cleanText := tcm.removeToolCallXML(text)
-	
+
 	return cleanText
 }
 
+// RemoveToolCallXML strips tool call XML from visible text without
+// feeding it to the parser. Use this when tool calls are already being
+// tracked via the runtime's event system (streamToolMsg/streamToolDoneMsg)
+// and you only need XML stripping for clean display.
+func (tcm *ToolCallManager) RemoveToolCallXML(text string) string {
+	tcm.mu.Lock()
+	defer tcm.mu.Unlock()
+	return tcm.removeToolCallXML(text)
+}
+
 // removeToolCallXML strips tool call XML from text
+// Only strips tags that are part of known tool call structures,
+// preserving angle brackets in normal text.
 func (tcm *ToolCallManager) removeToolCallXML(text string) string {
-	// Simple approach: remove anything between < and >
-	var result strings.Builder
-	inTag := false
-	
-	for _, ch := range text {
-		if ch == '<' {
-			inTag = true
-			continue
-		}
-		if ch == '>' {
-			inTag = false
-			continue
-		}
-		if !inTag {
-			result.WriteRune(ch)
+	// If no angle brackets, return early
+	if !strings.Contains(text, "<") {
+		return text
+	}
+
+	result := text
+
+	// Define the set of tool wrapper tags (not actual tool names)
+	wrapperTags := []string{"tool_calls", "invoke"}
+
+	// First remove complete wrapper blocks
+	for _, tag := range wrapperTags {
+		openTag := "<" + tag
+		closeTag := "</" + tag + ">"
+
+		for {
+			startIdx := strings.Index(result, openTag)
+			if startIdx == -1 {
+				break
+			}
+
+			// Find the matching closing tag
+			endIdx := strings.Index(result[startIdx:], closeTag)
+			if endIdx == -1 {
+				break
+			}
+			endIdx += startIdx + len(closeTag)
+
+			// Remove the whole wrapper block
+			result = result[:startIdx] + result[endIdx:]
 		}
 	}
-	
-	return result.String()
+
+	// List of known tool call tags to remove (actual tool names)
+	toolTags := []string{
+		"bash", "read_file", "write_file", "file_edit",
+		"glob", "grep", "web_fetch", "web_search",
+		"ask_user", "todo_write",
+	}
+
+	// Remove complete tool call blocks: <tool_name>...</tool_name>
+	for _, tag := range toolTags {
+		openTag := "<" + tag + ">"
+		closeTag := "</" + tag + ">"
+
+		for {
+			startIdx := strings.Index(result, openTag)
+			if startIdx == -1 {
+				break
+			}
+
+			endIdx := strings.Index(result[startIdx:], closeTag)
+			if endIdx == -1 {
+				// Incomplete block, don't remove
+				break
+			}
+
+			// Remove the complete block
+			endIdx += startIdx + len(closeTag)
+			result = result[:startIdx] + result[endIdx:]
+		}
+	}
+
+	// Parameter tags are only removed if they appear within known tool call context.
+	// Since we've already removed the wrapper, any remaining param tags are likely
+	// from incomplete streams. We'll leave them as-is to avoid over-stripping.
+
+	return result
 }
 
 // RenderActiveCalls renders all active tool calls
