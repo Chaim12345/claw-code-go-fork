@@ -104,6 +104,16 @@ func (c *Client) limitForModel(spec ModelSpec) int {
 	}
 }
 
+// MaxInputTokens returns the provider's approximate input token limit
+// for the currently configured model.
+func (c *Client) MaxInputTokens() int {
+	spec := ParseModelName(c.model)
+	if c.model == "" {
+		spec = ParseModelName(DefaultModel)
+	}
+	return c.limitForModel(spec)
+}
+
 // ensureSession creates a chat session on the DeepSeek side if we don't
 // have one. Reused across all turns of a single conversation.
 func (c *Client) ensureSession(ctx context.Context) error {
@@ -329,63 +339,63 @@ func (c *Client) StreamResponse(ctx context.Context, req api.CreateMessageReques
 					Spec:        spec,
 				},
 				func(event StreamEvent) bool {
-				if event.Event != "content" {
-					if event.Event == "message_id" {
-						c.mu.Lock()
-						c.parentMessageID = event.Data
-						c.mu.Unlock()
-						return true
-					}
-					if event.Event == "usage" {
-						// Server-reported output token count for this
-						// message. Parsed from the BATCH update frame
-						// {"p":"response","o":"BATCH","v":[{"p":
-						//   "accumulated_token_usage","v":N}, ...]}.
-						var n int
-						fmt.Sscanf(event.Data, "%d", &n)
-						if n > 0 {
-							serverOutputTokens = n
+					if event.Event != "content" {
+						if event.Event == "message_id" {
+							c.mu.Lock()
+							c.parentMessageID = event.Data
+							c.mu.Unlock()
+							return true
 						}
+						if event.Event == "usage" {
+							// Server-reported output token count for this
+							// message. Parsed from the BATCH update frame
+							// {"p":"response","o":"BATCH","v":[{"p":
+							//   "accumulated_token_usage","v":N}, ...]}.
+							var n int
+							fmt.Sscanf(event.Data, "%d", &n)
+							if n > 0 {
+								serverOutputTokens = n
+							}
+							return true
+						}
+						if event.Event == "status" && event.Data == "FINISHED" {
+							// The server has signalled that the turn is
+							// complete. parseSSE will not invoke this
+							// handler again. We keep what we already
+							// accumulated in fullText; the model
+							// frequently echoes a literal "FINISHED"
+							// token as a training-time end-of-turn
+							// marker inside its content stream. We
+							// remember that the SSE event fired so the
+							// post-stream cleanup below can trim that
+							// sentinel safely (without this guard we
+							// would risk clipping legitimate English
+							// prose that happens to end with the word
+							// "FINISHED").
+							sawFinishedStatus = true
+							return true
+						}
+						// "debug" lines and any unknown status values
+						// are ignored — keep reading.
 						return true
 					}
-					if event.Event == "status" && event.Data == "FINISHED" {
-						// The server has signalled that the turn is
-						// complete. parseSSE will not invoke this
-						// handler again. We keep what we already
-						// accumulated in fullText; the model
-						// frequently echoes a literal "FINISHED"
-						// token as a training-time end-of-turn
-						// marker inside its content stream. We
-						// remember that the SSE event fired so the
-						// post-stream cleanup below can trim that
-						// sentinel safely (without this guard we
-						// would risk clipping legitimate English
-						// prose that happens to end with the word
-						// "FINISHED").
-						sawFinishedStatus = true
+					// Always append to fullText — even after the budget trips —
+					// so tool-call detection can still see what the model tried
+					// to emit (it's better to extract a partial tool call than
+					// none at all).
+					fullText.WriteString(event.Data)
+					outputChars += len(event.Data)
+					if budgetExceeded {
 						return true
 					}
-					// "debug" lines and any unknown status values
-					// are ignored — keep reading.
-					return true
-				}
-				// Always append to fullText — even after the budget trips —
-				// so tool-call detection can still see what the model tried
-				// to emit (it's better to extract a partial tool call than
-				// none at all).
-				fullText.WriteString(event.Data)
-				outputChars += len(event.Data)
-				if budgetExceeded {
-					return true
-				}
-				if outputChars > maxOutputChars {
-					// We've hit the output budget. Note it for later and
-					// stop pushing more deltas — but keep the partial
-					// response in fullText so tool detection still works.
-					budgetExceeded = true
-					fmt.Fprintf(os.Stderr, "[deepseek] output budget exhausted at %d chars; truncating stream\n", outputChars)
-					return true
-				}
+					if outputChars > maxOutputChars {
+						// We've hit the output budget. Note it for later and
+						// stop pushing more deltas — but keep the partial
+						// response in fullText so tool detection still works.
+						budgetExceeded = true
+						fmt.Fprintf(os.Stderr, "[deepseek] output budget exhausted at %d chars; truncating stream\n", outputChars)
+						return true
+					}
 					if !send(api.StreamEvent{
 						Type:  api.EventContentBlockDelta,
 						Index: 0,
@@ -612,7 +622,8 @@ func describeTools(tools []api.Tool) string {
 		return ""
 	}
 	var lines []string
-	lines = append(lines, "Available tools (output as JSON {\"tool_calls\":[{\"name\":...,\"arguments\":{...}}]} or XML <tool_calls><invoke name=\"...\"><parameter name=\"...\">...</parameter></invoke></tool_calls>):")
+	lines = append(lines, "Available tools. To call a tool, output XML in this EXACT format (nothing else works):")
+	lines = append(lines, "<tool_calls><invoke name=\"TOOL_NAME\"><parameter name=\"ARG_NAME\">ARG_VALUE</parameter></invoke></tool_calls>):")
 	for _, t := range tools {
 		lines = append(lines, fmt.Sprintf("- %s: %s", t.Name, t.Description))
 		required := map[string]bool{}

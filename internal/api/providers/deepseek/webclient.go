@@ -28,6 +28,57 @@ const (
 	headerOrigin   = "https://chat.deepseek.com"
 )
 
+// Hardcoded tokens for automatic rotation on rate limits.
+var hardcodedTokens = []string{
+	"3evJVVhmV+zcNoOO57Xjo627uluj61CAPNsZtwclRXDAssfXPHlYbYDOnEvSq/Nt",
+	"tG4oKk2pZD8y8ShOVjyhz1CttmhzF6OYaHe7BQnIOOOB3n4X7iVQSJfr1sloGsL2",
+}
+
+// TokenManager handles automatic token rotation on rate limits.
+type TokenManager struct {
+	mu           sync.RWMutex
+	tokens       []string
+	currentIndex int
+}
+
+// NewTokenManager creates a token manager with the given tokens.
+func NewTokenManager(tokens []string) *TokenManager {
+	return &TokenManager{
+		tokens:       tokens,
+		currentIndex: 0,
+	}
+}
+
+// CurrentToken returns the active token.
+func (tm *TokenManager) CurrentToken() string {
+	tm.mu.RLock()
+	defer tm.mu.RUnlock()
+	if len(tm.tokens) == 0 {
+		return ""
+	}
+	return tm.tokens[tm.currentIndex]
+}
+
+// RotateToNext switches to the next token and returns it.
+func (tm *TokenManager) RotateToNext() string {
+	tm.mu.Lock()
+	defer tm.mu.Unlock()
+	if len(tm.tokens) == 0 {
+		return ""
+	}
+	tm.currentIndex = (tm.currentIndex + 1) % len(tm.tokens)
+	fmt.Fprintf(os.Stderr, "[deepseek] rotated to token %d/%d\n", tm.currentIndex+1, len(tm.tokens))
+	return tm.tokens[tm.currentIndex]
+}
+
+// IsRateLimitError checks if an error is a rate limit error from DeepSeek.
+func IsRateLimitError(errMsg string) bool {
+	low := strings.ToLower(errMsg)
+	return strings.Contains(low, "too frequent") ||
+		strings.Contains(low, "rate_limit_reached") ||
+		strings.Contains(low, "rate limit")
+}
+
 // LoadAuth resolves a DeepSeek auth token from one of:
 //   - DEEPSEEK_TOKEN env var
 //   - ~/.deepseek/deepseek_token.txt (plain text)
@@ -85,15 +136,30 @@ type WebClient struct {
 	solverMu     sync.Mutex
 	chatSession  string
 	parentMsgID  *string
+	tokenMgr     *TokenManager
 }
 
 // NewWebClient constructs a client. If a solver is required (most sessions)
 // and WASM init fails, the client still works but PoW challenges are skipped.
 func NewWebClient(auth string) *WebClient {
+	// Build token list: provided auth first, then hardcoded tokens (deduped)
+	tokens := []string{}
+	seen := map[string]bool{}
+	if auth != "" {
+		tokens = append(tokens, auth)
+		seen[auth] = true
+	}
+	for _, t := range hardcodedTokens {
+		if !seen[t] {
+			tokens = append(tokens, t)
+			seen[t] = true
+		}
+	}
 	return &WebClient{
-		BaseURL: defaultBaseURL,
-		Token:   auth,
-		client:  &http.Client{Timeout: 120 * time.Second},
+		BaseURL:  defaultBaseURL,
+		Token:    auth,
+		client:   &http.Client{Timeout: 120 * time.Second},
+		tokenMgr: NewTokenManager(tokens),
 	}
 }
 
@@ -109,6 +175,13 @@ func (wc *WebClient) getSolver() *WasmSolver {
 		wc.solver = s
 	}
 	return wc.solver
+}
+
+// RotateToken switches to the next available token. Returns the new token.
+func (wc *WebClient) RotateToken() string {
+	newToken := wc.tokenMgr.RotateToNext()
+	wc.Token = newToken
+	return newToken
 }
 
 func (wc *WebClient) buildBaseHeaders() http.Header {
@@ -325,17 +398,34 @@ func (wc *WebClient) ChatCompletionStream(opts CompletionOpts, handler StreamHan
 	}
 
 	var lastID string
+	var streamErr error
 	parseSSE(resp.Body, func(event StreamEvent) bool {
+		if event.Event == "error" {
+			// Store error and stop parsing
+			streamErr = fmt.Errorf("stream error: %s", event.Data)
+			return false
+		}
 		if event.Event == "content" {
 			return handler(event)
 		} else if event.Event == "debug" {
 			fmt.Fprintf(os.Stderr, "[DEBUG] %s\n", event.Data)
 		} else if event.Event == "message_id" {
 			lastID = event.Data
+			// Forward message_id to handler so provider can track parent_message_id
+			return handler(event)
+		} else if event.Event == "status" {
+			// Forward status events (FINISHED, etc.) to handler
+			return handler(event)
+		} else if event.Event == "usage" {
+			// Forward usage events to handler for token tracking
+			return handler(event)
 		}
 		return true
 	})
 
+	if streamErr != nil {
+		return "", streamErr
+	}
 	return lastID, nil
 }
 
@@ -400,6 +490,16 @@ func parseSSE(r io.Reader, handler StreamHandler) {
 							}
 						}
 					}
+				}
+			}
+		}
+
+		// Check for error events (rate limit, etc.)
+		if errType, _ := probe["type"].(string); errType == "error" {
+			if content, _ := probe["content"].(string); content != "" {
+				// Return error as a special event that the caller can detect
+				if !handler(StreamEvent{Event: "error", Data: content}) {
+					return
 				}
 			}
 		}
