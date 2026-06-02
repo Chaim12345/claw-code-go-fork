@@ -36,6 +36,9 @@ func main() {
 		case "resume-session":
 			compat.RunResumeSession(os.Args[2:])
 			return
+		case "ralph":
+			runRalphSubcommand(os.Args[2:])
+			return
 		}
 	}
 
@@ -55,7 +58,9 @@ func main() {
 		fmt.Fprintf(os.Stderr, "  dump-manifests [--src <dir>] [--json]   List tools, slash commands, and source manifest\n")
 		fmt.Fprintf(os.Stderr, "  bootstrap-plan [--json]                 Print the ordered startup phase plan\n")
 		fmt.Fprintf(os.Stderr, "  print-system-prompt [--cwd] [--date]    Render the full system prompt\n")
-		fmt.Fprintf(os.Stderr, "  resume-session <file> [commands...]     Replay a saved session file\n\n")
+		fmt.Fprintf(os.Stderr, "  resume-session <file> [commands...]     Replay a saved session file\n")
+		fmt.Fprintf(os.Stderr, "  ralph [--spec <path>] [--max-iterations <n>]\n")
+		fmt.Fprintf(os.Stderr, "                                          Run a Ralph loop against a spec/roadmap file\n\n")
 		fmt.Fprintf(os.Stderr, "Options:\n")
 		flag.PrintDefaults()
 		fmt.Fprintf(os.Stderr, "\nEnvironment variables:\n")
@@ -85,43 +90,15 @@ func main() {
 		cfg.DeltaMode = true
 	}
 
-	// Resolve credentials using the multi-provider credential store.
-	// Env vars take precedence (ANTHROPIC_API_KEY, OPENAI_API_KEY).
-	// Falls back gracefully so the TUI can start and prompt the user to /login.
-	provider, token, authMethod, credErr := auth.ResolveCredentials()
-	if credErr == nil {
-		cfg.ProviderName = provider
-		cfg.AuthMethod = authMethod
-		if authMethod == "oauth" {
-			cfg.OAuthToken = token
-		} else {
-			cfg.APIKey = token
-		}
-	} else {
-		// No credentials found — start with NoAuthClient so the TUI still opens.
-		// The user can run /login inside the TUI.
-		fmt.Fprintf(os.Stderr, "Note: no credentials found (%v).\n", credErr)
-		fmt.Fprintln(os.Stderr, "      Use /login in the TUI to authenticate.")
-	}
-
-	// Create the provider client (or a no-auth placeholder).
-	realClient, clientErr := runtime.NewProviderClient(cfg)
-	if clientErr != nil {
-		fmt.Fprintf(os.Stderr, "Note: could not create %s client: %v\n", cfg.ProviderName, clientErr)
+	// Resolve credentials and build the provider client. The TUI flow
+	// falls back to a no-auth placeholder so the user can /login from
+	// inside the chat; non-interactive subcommands handle the error
+	// differently (see runRalphSubcommand).
+	realClient, buildErr := buildProvider(cfg)
+	if buildErr != nil {
+		fmt.Fprintf(os.Stderr, "Note: %v\n", buildErr)
 		fmt.Fprintln(os.Stderr, "      Use /login in the TUI to authenticate.")
 		realClient = runtime.NewNoAuthClient()
-	}
-
-	// Wire up DeepSeek native web search if the DeepSeek provider is active.
-	// This enables the web_search tool to use DeepSeek's server-side search
-	// (Instant model with search_enabled=true) instead of Brave/DDG.
-	if cfg.ProviderName == "deepseek" {
-		if dsProvider, ok := realClient.(*deepseekprovider.Client); ok {
-			tools.SetNativeSearch(func(ctx context.Context, query string, numResults int) (string, error) {
-				return dsProvider.NativeSearch(ctx, query, numResults)
-			})
-			fmt.Fprintf(os.Stderr, "[web_search] DeepSeek native search enabled\n")
-		}
 	}
 
 	loop := runtime.NewConversationLoop(cfg, realClient)
@@ -173,7 +150,7 @@ func main() {
 
 	// Single prompt (non-interactive) mode — no TUI, plain stdout streaming.
 	if *promptFlag != "" {
-		if credErr != nil {
+		if buildErr != nil {
 			fmt.Fprintln(os.Stderr, "Error: cannot use --prompt without valid credentials.")
 			fmt.Fprintln(os.Stderr, "Set ANTHROPIC_API_KEY or OPENAI_API_KEY, or run the TUI and use /login.")
 			os.Exit(1)
@@ -241,4 +218,80 @@ func saveSessionSilent(dir string, loop *runtime.ConversationLoop) {
 	if err := runtime.SaveSession(dir, loop.Session); err != nil {
 		fmt.Fprintf(os.Stderr, "Warning: could not save session: %v\n", err)
 	}
+}
+
+// buildProvider resolves credentials via the multi-provider credential
+// store, constructs the API client, and wires up any provider-specific
+// tooling (e.g. DeepSeek native web search). Returns an error if no
+// credentials are found or the provider cannot be created. Callers
+// decide how to handle the error (TUI falls back to NoAuthClient so the
+// user can /login; non-interactive subcommands should fail hard).
+func buildProvider(cfg *runtime.Config) (api.APIClient, error) {
+	provider, token, authMethod, credErr := auth.ResolveCredentials()
+	if credErr != nil {
+		return nil, fmt.Errorf("no credentials found: %w (set ANTHROPIC_API_KEY, OPENAI_API_KEY, or DEEPSEEK_TOKEN)", credErr)
+	}
+	cfg.ProviderName = provider
+	cfg.AuthMethod = authMethod
+	if authMethod == "oauth" {
+		cfg.OAuthToken = token
+	} else {
+		cfg.APIKey = token
+	}
+
+	client, err := runtime.NewProviderClient(cfg)
+	if err != nil {
+		return nil, fmt.Errorf("could not create %s client: %w", cfg.ProviderName, err)
+	}
+
+	// Wire up DeepSeek native web search so the web_search tool uses
+	// DeepSeek's server-side search (Instant model with search_enabled=true)
+	// instead of Brave/DDG.
+	if cfg.ProviderName == "deepseek" {
+		if dsProvider, ok := client.(*deepseekprovider.Client); ok {
+			tools.SetNativeSearch(func(ctx context.Context, query string, numResults int) (string, error) {
+				return dsProvider.NativeSearch(ctx, query, numResults)
+			})
+			fmt.Fprintf(os.Stderr, "[web_search] DeepSeek native search enabled\n")
+		}
+	}
+
+	return client, nil
+}
+
+// runRalphSubcommand is the entry point for `claw ralph [--spec ...]
+// [--max-iterations ...]`. It wires the existing runtime loop into the
+// Ralph driver, using the same credentials/provider resolution as the
+// TUI and --prompt modes. Fails hard on missing credentials.
+func runRalphSubcommand(args []string) {
+	fs := flag.NewFlagSet("ralph", flag.ExitOnError)
+	spec := fs.String("spec", runtime.DefaultRalphSpecPath, "Path to the spec/roadmap file")
+	maxIter := fs.Int("max-iterations", runtime.DefaultRalphMaxIterations, "Maximum fresh-context iterations")
+	_ = fs.Parse(args)
+
+	cfg := runtime.LoadConfig()
+	// Ralph is an autonomous loop — same flags as the RunTask path.
+	cfg.Autonomous = true
+	if cfg.MaxTurns <= 0 {
+		cfg.MaxTurns = 5 // per-iteration turn cap
+	}
+
+	provider, err := buildProvider(cfg)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
+	}
+	loop := runtime.NewConversationLoop(cfg, provider)
+
+	ctx := context.Background()
+	ralphCfg := runtime.DefaultRalphConfig()
+	ralphCfg.SpecPath = *spec
+	ralphCfg.MaxIterations = *maxIter
+
+	fmt.Fprintf(os.Stderr, "[ralph] starting against %s (max %d iterations)\n", ralphCfg.SpecPath, ralphCfg.MaxIterations)
+	if err := runtime.RunRalphLoop(ctx, loop, ralphCfg); err != nil {
+		fmt.Fprintf(os.Stderr, "[ralph] stopped: %v\n", err)
+		os.Exit(1)
+	}
+	fmt.Fprintf(os.Stderr, "[ralph] done\n")
 }
