@@ -3,6 +3,7 @@ package runtime
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"regexp"
@@ -220,6 +221,47 @@ func lastAssistantText(messages []api.Message) string {
 		return sb.String()
 	}
 	return ""
+}
+
+// ErrRalphMaxIterations is returned by RunRalphLoop when the loop
+// hits MaxIterations without the spec being completed.
+var ErrRalphMaxIterations = errors.New("ralph: max iterations reached without completion")
+
+// IterFn is the per-iteration hook used by RunRalphLoopWithIter.
+// Production code calls RunRalphLoop; tests inject a fake.
+type IterFn func(ctx context.Context, iteration, maxIter int) (RalphVerdictKind, string, error)
+
+// RunRalphLoopWithIter drives the Ralph loop with an injected
+// iteration function. Most callers want RunRalphLoop; this
+// version is exposed for testability.
+func RunRalphLoopWithIter(ctx context.Context, cfg RalphConfig, iter IterFn) error {
+	maxIter := cfg.MaxIterations
+	if maxIter <= 0 {
+		maxIter = DefaultRalphMaxIterations
+	}
+	if maxIter > MaxRalphIterations {
+		maxIter = MaxRalphIterations
+	}
+	for i := 1; i <= maxIter; i++ {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		verdict, text, err := iter(ctx, i, maxIter)
+		if err != nil {
+			return fmt.Errorf("iteration %d: %w", i, err)
+		}
+		fmt.Fprintf(os.Stderr, "[ralph] iter %d/%d: verdict=%v text=%q\n", i, maxIter, verdict, text)
+		if verdict == RalphVerdictDone {
+			return nil
+		}
+		if verdict == RalphVerdictBlocked {
+			// Documented exit: the model said it's blocked.
+			// Treat as done so the loop doesn't run forever.
+			fmt.Fprintf(os.Stderr, "[ralph] iter %d reported blocked; exiting cleanly\n", i)
+			return nil
+		}
+	}
+	return fmt.Errorf("%w (max=%d)", ErrRalphMaxIterations, cfg.MaxIterations)
 }
 
 // RenderRalphPrompt executes the prompt template with the spec

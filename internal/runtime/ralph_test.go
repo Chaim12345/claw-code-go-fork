@@ -1,6 +1,7 @@
 package runtime
 
 import (
+	"context"
 	"strings"
 	"testing"
 )
@@ -107,5 +108,42 @@ func TestRalphIteration_DetectsSentinel(t *testing.T) {
 	verdict = RalphVerdict("Spec looks empty to me.", "", cfg)
 	if verdict != RalphVerdictDone {
 		t.Errorf("got %v, want %v", verdict, RalphVerdictDone)
+	}
+}
+
+func TestRalphLoop_StopsOnVerdict(t *testing.T) {
+	called := 0
+	iterFn := func(ctx context.Context, iteration, maxIter int) (RalphVerdictKind, string, error) {
+		called++
+		if iteration < 3 {
+			return RalphVerdictContinue, "still going", nil
+		}
+		return RalphVerdictDone, "RALPH_DONE", nil
+	}
+	cfg := DefaultRalphConfig()
+	cfg.MaxIterations = 10
+	err := RunRalphLoopWithIter(context.Background(), cfg, iterFn)
+	if err != nil {
+		t.Fatalf("RunRalphLoopWithIter: %v", err)
+	}
+	if called != 3 {
+		t.Errorf("expected 3 iterations, got %d", called)
+	}
+}
+
+func TestRalphLoop_StopsAtMax(t *testing.T) {
+	called := 0
+	iterFn := func(ctx context.Context, iteration, maxIter int) (RalphVerdictKind, string, error) {
+		called++
+		return RalphVerdictContinue, "x", nil
+	}
+	cfg := DefaultRalphConfig()
+	cfg.MaxIterations = 5
+	err := RunRalphLoopWithIter(context.Background(), cfg, iterFn)
+	if err == nil {
+		t.Error("expected error on max iterations")
+	}
+	if called != 5 {
+		t.Errorf("expected 5 iterations, got %d", called)
 	}
 }
