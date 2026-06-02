@@ -42,6 +42,28 @@ type RalphConfig struct {
 
 	// WorkingDir is the cwd the model sees. Empty means inherit.
 	WorkingDir string
+
+	// SelfDebug enables a one-shot "self-debug" pass when an
+	// iteration has exhausted all retries. The loop captures the
+	// last error, mutates the prompt template to inject a
+	// "## Self-debug" section that names the error, and runs one
+	// more iteration. If that debug iteration also fails (or
+	// reports blocked), the loop gives up. If it succeeds (verdict
+	// Continue or Done), the loop proceeds as if the original
+	// iteration had worked.
+	//
+	// This is the answer to "the agent got an exit-127 from bash
+	// and now needs to fix its own PATH/environment." Instead of
+	// dying, ralph sees the error and is tasked with debugging.
+	//
+	// Default: true (opt-out for tests).
+	SelfDebug bool
+
+	// LastError is set by the loop when SelfDebug triggers. It is
+	// not part of the public constructor; the loop mutates the
+	// config in-flight to inject the error into the next prompt.
+	// Users should not set this directly.
+	LastError string
 }
 
 // Defaults for the Ralph loop.
@@ -76,7 +98,56 @@ The spec content is shown below for convenience — it is the live file, so re-r
 
 {{.Spec}}
 
---- END SPEC ---`
+--- END SPEC ---
+
+{{if .LastError}}
+---
+
+## Self-debug task
+
+Your previous iteration failed with this error:
+
+```
+{{.LastError}}
+```
+
+You are the developer. You are the debugger. Treat this as a real
+bug report about your own work — or about the environment you run in.
+
+**Your job for THIS iteration**: investigate and fix the root cause,
+then resume work on the spec above.
+
+Concrete steps:
+  1. Reproduce the error if possible (read the relevant code, run
+     the failing command yourself).
+  2. Identify the smallest fix:
+     - Missing tool / binary on PATH → install it, add it to PATH,
+       or symlink it (e.g. `ln -s /usr/local/go/bin/go /usr/local/bin/go`).
+     - Missing env var → export it before re-running, or document it
+       in a script.
+     - Wrong API / signature mismatch → read the actual definition
+       and reconcile.
+     - Rate limit / transient → the loop already retries with
+       backoff and rotates tokens. If you're still seeing it after
+       the loop retried, the issue is upstream; do not loop on it.
+  3. Apply the fix.
+  4. Verify the fix actually works (run the previously-failing
+     command, run `go test ./...`, etc.).
+  5. Commit the fix as a separate atomic commit.
+  6. Resume work on the spec: pick the next open item, implement,
+     test, commit, mark done.
+  7. Output a one-paragraph summary that BEGINS with
+     "DEBUG: <root cause>" so the next iteration can see what you
+     diagnosed, even if you also made spec progress.
+
+If your investigation reveals the error is non-recoverable
+(corrupted filesystem, unrecoverable auth failure, spec is
+intrinsically wrong), document it under "## Blockers" in the
+spec and exit normally — same as the regular blocker protocol.
+
+**This is your only chance to fix this.** If you cannot fix it
+in this iteration, the loop will give up entirely.
+{{end}}`
 )
 
 // DefaultRalphConfig returns a RalphConfig with all defaults
@@ -87,6 +158,7 @@ func DefaultRalphConfig() RalphConfig {
 		MaxIterations:  DefaultRalphMaxIterations,
 		DoneSentinel:   DefaultRalphDoneSentinel,
 		PromptTemplate: defaultRalphPromptTemplate,
+		SelfDebug:      true,
 	}
 }
 
@@ -440,6 +512,10 @@ func RunRalphLoop(ctx context.Context, loop *ConversationLoop, cfg RalphConfig) 
 	if _, err := readRalphSpec(cfg.SpecPath); err != nil {
 		return fmt.Errorf("read spec %q: %w", cfg.SpecPath, err)
 	}
+	// Capture cfg by pointer so the self-debug pass (inside
+	// RunRalphLoopWithIter) can mutate cfg.LastError to inject the
+	// last error into the next prompt.
+	cfgPtr := &cfg
 	iter := func(ctx context.Context, i, max int) (RalphVerdictKind, string, error) {
 		// Reset the provider session so each iteration gets a
 		// fresh context. The spec file is the only persistent
@@ -447,7 +523,7 @@ func RunRalphLoop(ctx context.Context, loop *ConversationLoop, cfg RalphConfig) 
 		if resetter, ok := loop.Client.(interface{ ResetSession() error }); ok {
 			_ = resetter.ResetSession()
 		}
-		return RalphOneIteration(ctx, loop, cfg, i, max)
+		return RalphOneIteration(ctx, loop, *cfgPtr, i, max)
 	}
 	return RunRalphLoopWithIter(ctx, cfg, iter)
 }
@@ -466,12 +542,14 @@ func RenderRalphPrompt(cfg RalphConfig, specBody string, iteration, maxIter int)
 		Iteration     int
 		MaxIterations int
 		Sentinel      string
+		LastError     string
 	}{
 		Spec:          specBody,
 		SpecPath:      cfg.SpecPath,
 		Iteration:     iteration,
 		MaxIterations: maxIter,
 		Sentinel:      cfg.DoneSentinel,
+		LastError:     cfg.LastError,
 	}
 	var buf bytes.Buffer
 	if err := tpl.Execute(&buf, data); err != nil {

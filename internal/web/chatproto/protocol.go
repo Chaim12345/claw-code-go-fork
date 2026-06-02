@@ -50,6 +50,9 @@ type ServerOutbound struct {
 	// text_delta, text_final
 	Text string `json:"text,omitempty"`
 
+	// tool_start, tool_done, permission_ask
+	ToolUseID string `json:"tool_use_id,omitempty"`
+
 	// tool_start
 	ToolName  string `json:"tool_name,omitempty"`
 	ToolInput string `json:"tool_input,omitempty"`
@@ -91,4 +94,5 @@ const (
 	MsgUsage           = "usage"
 	MsgDone            = "done"
 	MsgError           = "error"
+	MsgWarn            = "warn"
 )

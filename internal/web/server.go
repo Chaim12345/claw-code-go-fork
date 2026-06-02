@@ -13,7 +13,9 @@ package web
 
 import (
 	"context"
+	"crypto/rand"
 	"embed"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -24,6 +26,8 @@ import (
 	"sync"
 	"syscall"
 	"time"
+
+	"claw-code-go/internal/runtime"
 
 	"github.com/creack/pty"
 	"github.com/gorilla/websocket"
@@ -57,6 +61,12 @@ type Config struct {
 type Server struct {
 	cfg     Config
 	upgrader websocket.Upgrader
+
+	// ChatLoopFactory, if set, builds a *runtime.ConversationLoop for
+	// each /api/chat/ws connection. If nil, the endpoint returns 501
+	// Not Implemented. Set by the caller after constructing the
+	// runtime loop (e.g. in cmd/claw-code-go/main.go).
+	ChatLoopFactory func() *runtime.ConversationLoop
 
 	mu        sync.Mutex
 	sessions  map[*ptySession]struct{}
@@ -117,6 +127,7 @@ func (s *Server) routes() http.Handler {
 	mux.Handle("/static/", http.StripPrefix("/static/", http.FileServer(http.FS(staticSub))))
 	mux.HandleFunc("/", s.handleIndex)
 	mux.HandleFunc("/ws", s.handleWS)
+	mux.HandleFunc("/api/chat/ws", s.handleChatWS)
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("ok"))
@@ -200,6 +211,26 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 
 	// Reader hung up; tear down the PTY.
 	sess.close()
+}
+
+// handleChatWS upgrades the HTTP request to a WebSocket and runs the
+// structured chat protocol via a *runtime.ConversationLoop.
+// Requires ChatLoopFactory to be set on the Server.
+func (s *Server) handleChatWS(w http.ResponseWriter, r *http.Request) {
+	if s.ChatLoopFactory == nil {
+		http.Error(w, "chat mode not available (set ChatLoopFactory)", http.StatusNotImplemented)
+		return
+	}
+	conn, err := s.upgrader.Upgrade(w, r, nil)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "[web] chat ws upgrade: %v\n", err)
+		return
+	}
+	loop := s.ChatLoopFactory()
+	sessionID := newSessionID()
+	ctx := r.Context()
+	runChatSession(ctx, conn, loop, sessionID)
+	conn.Close()
 }
 
 // ptySession owns a single PTY + child process.
@@ -293,4 +324,16 @@ func (s *Server) killAll() {
 		sess.close()
 	}
 	s.sessions = map[*ptySession]struct{}{}
+}
+
+// newSessionID returns a short random hex string suitable for
+// identifying a chat session in logs and to the client.
+func newSessionID() string {
+	b := make([]byte, 8)
+	if _, err := rand.Read(b); err != nil {
+		// crypto/rand.Read is documented to always return nil on
+		// Linux; fall back to a timestamp as a last resort.
+		return fmt.Sprintf("sess_%d", time.Now().UnixNano())
+	}
+	return "sess_" + hex.EncodeToString(b)
 }

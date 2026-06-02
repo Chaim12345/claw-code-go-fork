@@ -82,7 +82,7 @@ same `ConversationLoop` — only the wire format differs.
       hello message with the session id.
   Document each message with a doc comment and add a small table of
   examples at the top of the file.
-- [ ] **Implement `/api/chat/ws`** in `internal/web/server.go`. It
+- [x] **Implement `/api/chat/ws`** in `internal/web/server.go`. It
   should:
     - Build a `ConversationLoop` using the same auth/provider/model
       resolution as the existing PTY path.
