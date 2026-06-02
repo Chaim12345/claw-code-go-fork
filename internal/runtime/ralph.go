@@ -264,6 +264,38 @@ func RunRalphLoopWithIter(ctx context.Context, cfg RalphConfig, iter IterFn) err
 	return fmt.Errorf("%w (max=%d)", ErrRalphMaxIterations, cfg.MaxIterations)
 }
 
+// RunRalphLoop is the production entry point. It drives a
+// ConversationLoop through the Ralph pattern, reading the spec
+// file from disk on each iteration and giving the model a fresh
+// context (we reset the provider session between iterations so
+// the model genuinely starts each turn with the spec prompt as
+// its only context).
+//
+// Stop conditions:
+//   - Sentinel detected in the model's final text → return nil
+//   - Spec is fully checked off → return nil
+//   - MaxIterations reached → return ErrRalphMaxIterations
+//   - Context cancelled → return ctx.Err()
+//   - Per-iteration error → return wrapped error
+func RunRalphLoop(ctx context.Context, loop *ConversationLoop, cfg RalphConfig) error {
+	if cfg.SpecPath == "" {
+		cfg.SpecPath = DefaultRalphSpecPath
+	}
+	if _, err := readRalphSpec(cfg.SpecPath); err != nil {
+		return fmt.Errorf("read spec %q: %w", cfg.SpecPath, err)
+	}
+	iter := func(ctx context.Context, i, max int) (RalphVerdictKind, string, error) {
+		// Reset the provider session so each iteration gets a
+		// fresh context. The spec file is the only persistent
+		// memory.
+		if resetter, ok := loop.Client.(interface{ ResetSession() error }); ok {
+			_ = resetter.ResetSession()
+		}
+		return RalphOneIteration(ctx, loop, cfg, i, max)
+	}
+	return RunRalphLoopWithIter(ctx, cfg, iter)
+}
+
 // RenderRalphPrompt executes the prompt template with the spec
 // body, current iteration, max iterations, and sentinel. Returns
 // an error if the template is invalid.
