@@ -108,7 +108,7 @@ same `ConversationLoop` — only the wire format differs.
 
 ## Phase 2 — Auth & security baseline
 
-- [ ] **Basic auth via env var**: add `CLAW_WEB_AUTH=user:pass` (or
+- [x] **Basic auth via env var**: add `CLAW_WEB_AUTH=user:pass` (or
   `CLAW_WEB_AUTH_FILE=path`). When set, all `/`, `/api/*`, `/ws`,
   `/static/*` require HTTP Basic Auth. Implement as a middleware in
   `internal/web/auth.go` with constant-time compare. Health

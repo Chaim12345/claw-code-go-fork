@@ -121,7 +121,7 @@ func (s *Server) routes() http.Handler {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("ok"))
 	})
-	return mux
+	return basicAuthMiddleware(mux)
 }
 
 func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
