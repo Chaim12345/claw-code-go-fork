@@ -36,15 +36,21 @@ func authFromEnv() (user, pass string) {
 // Basic Auth when CLAW_WEB_AUTH (or CLAW_WEB_AUTH_FILE) is set.
 // Health endpoints (/healthz, /readyz, /metrics) are excluded.
 // Uses constant-time comparison to prevent timing attacks.
+//
+// If both CLAW_WEB_AUTH and CLAW_WEB_TOKEN are set, either method
+// grants access (the first successful check wins).
 func basicAuthMiddleware(next http.Handler) http.Handler {
-	user, pass := authFromEnv()
-	if user == "" {
-		// No auth configured — pass through.
+	basicUser, basicPass := authFromEnv()
+	bearerToken := os.Getenv("CLAW_WEB_TOKEN")
+
+	// If no auth is configured at all, pass through.
+	if basicUser == "" && bearerToken == "" {
 		return next
 	}
 
-	expectedUser := []byte(user)
-	expectedPass := []byte(pass)
+	expectedUser := []byte(basicUser)
+	expectedPass := []byte(basicPass)
+	expectedBearer := []byte(bearerToken)
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Allow health/metrics endpoints without auth.
@@ -53,23 +59,47 @@ func basicAuthMiddleware(next http.Handler) http.Handler {
 			return
 		}
 
-		reqUser, reqPass, ok := r.BasicAuth()
-		if !ok {
-			w.Header().Set("WWW-Authenticate", `Basic realm="claw-code-go", charset="UTF-8"`)
-			http.Error(w, "Authentication required", http.StatusUnauthorized)
-			return
+		// 1. Try Bearer token (Authorization header or ?token= query param).
+		if len(expectedBearer) > 0 {
+			token := bearerFromRequest(r)
+			if token != "" && subtle.ConstantTimeCompare([]byte(token), expectedBearer) == 1 {
+				next.ServeHTTP(w, r)
+				return
+			}
 		}
 
-		// Constant-time comparison.
-		if subtle.ConstantTimeCompare([]byte(reqUser), expectedUser) != 1 ||
-			subtle.ConstantTimeCompare([]byte(reqPass), expectedPass) != 1 {
-			w.Header().Set("WWW-Authenticate", `Basic realm="claw-code-go", charset="UTF-8"`)
-			http.Error(w, "Invalid credentials", http.StatusUnauthorized)
-			return
+		// 2. Try Basic Auth.
+		if basicUser != "" {
+			reqUser, reqPass, ok := r.BasicAuth()
+			if ok &&
+				subtle.ConstantTimeCompare([]byte(reqUser), expectedUser) == 1 &&
+				subtle.ConstantTimeCompare([]byte(reqPass), expectedPass) == 1 {
+				next.ServeHTTP(w, r)
+				return
+			}
 		}
 
-		next.ServeHTTP(w, r)
+		// If basic auth is configured, respond with a Basic challenge.
+		if basicUser != "" {
+			w.Header().Set("WWW-Authenticate", `Basic realm="claw-code-go", charset="UTF-8"`)
+		}
+		http.Error(w, "Authentication required", http.StatusUnauthorized)
 	})
+}
+
+// bearerFromRequest extracts a bearer token from the Authorization
+// header or the ?token= query parameter.
+// Query-param tokens may leak via Referer; recommend HTTPS.
+func bearerFromRequest(r *http.Request) string {
+	// Authorization: Bearer <token>
+	if auth := r.Header.Get("Authorization"); strings.HasPrefix(auth, "Bearer ") {
+		return strings.TrimPrefix(auth, "Bearer ")
+	}
+	// ?token=... query parameter
+	if tok := r.URL.Query().Get("token"); tok != "" {
+		return tok
+	}
+	return ""
 }
 
 // isHealthPath returns true for paths that should be accessible

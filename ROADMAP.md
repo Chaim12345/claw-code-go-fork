@@ -113,7 +113,7 @@ same `ConversationLoop` — only the wire format differs.
   `/static/*` require HTTP Basic Auth. Implement as a middleware in
   `internal/web/auth.go` with constant-time compare. Health
   endpoints (`/healthz`) stay open.
-- [ ] **Optional bearer token auth**: `CLAW_WEB_TOKEN=<secret>` —
+- [x] **Optional bearer token auth**: `CLAW_WEB_TOKEN=<secret>` —
   accept as `Authorization: Bearer ...` OR `?token=...` query
   parameter (so a browser can bookmark a session). Document that
   query-param token leaks via referer; recommend HTTPS.
