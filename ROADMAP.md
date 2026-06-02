@@ -144,7 +144,7 @@ Build a proper chat UI as a single-page app served from
 `internal/web/static/chat.html`. It must work on a 375px-wide
 viewport with touch input, and gracefully scale up to desktop.
 
-- [ ] **HTML scaffold** (`chat.html`): semantic structure with
+- [x] **HTML scaffold** (`chat.html`): semantic structure with
   `<header>`, `<main id="messages">`, `<form id="composer">`,
   `<footer>`. Viewport meta: `width=device-width, initial-scale=1,
   viewport-fit=cover`. Theme color meta for the OS chrome.

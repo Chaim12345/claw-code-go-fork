@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#1a1a2e" media="(prefers-color-scheme: dark)">
+<meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)">
+<title>claw-code-go — Chat</title>
+<link rel="stylesheet" href="/static/css/chat.css">
+</head>
+<body>
+  <header id="top-bar">
+    <button id="sidebar-toggle" aria-label="Toggle sidebar" title="Toggle sidebar">☰</button>
+    <h1>claw-code-go</h1>
+    <span id="connection-status" class="status-pill status-connected">connected</span>
+  </header>
+
+  <div id="layout">
+    <aside id="sidebar">
+      <nav>
+        <h2>Sessions</h2>
+        <ul id="session-list">
+          <li class="session-item active">Current session</li>
+        </ul>
+      </nav>
+    </aside>
+
+    <main id="messages" aria-live="polite" role="log">
+      <!-- Messages are inserted here by JS -->
+    </main>
+  </div>
+
+  <footer>
+    <form id="composer" autocomplete="off">
+      <textarea
+        id="composer-input"
+        rows="1"
+        placeholder="Ask claw-code-go…"
+        aria-label="Message input"
+        maxlength="100000"
+      ></textarea>
+      <button type="submit" id="send-button" aria-label="Send message" title="Send message">
+        ↑
+      </button>
+    </form>
+  </footer>
+
+  <script src="/static/js/chat.js"></script>
+</body>
+</html>
