@@ -307,3 +307,52 @@ footer {
     margin: 0 auto;
   }
 }
+
+/* === Sidebar mobile slide-in (toggled by JS) === */
+#sidebar.sidebar-open {
+  display: block;
+  position: fixed;
+  top: var(--topbar-height);
+  left: 0;
+  bottom: 0;
+  z-index: 100;
+  box-shadow: 2px 0 12px rgba(0,0,0,0.3);
+}
+
+/* === Message bubbles === */
+.message {
+  max-width: 85%;
+  padding: var(--space-md) var(--space-lg);
+  border-radius: var(--radius-lg);
+  font-size: var(--text-sm);
+  line-height: 1.5;
+  word-wrap: break-word;
+}
+.message-user {
+  align-self: flex-end;
+  background: var(--color-primary);
+  color: #fff;
+  border-bottom-right-radius: var(--radius-sm);
+}
+.message-assistant {
+  align-self: flex-start;
+  background: var(--color-surface);
+  color: var(--color-text);
+  border-bottom-left-radius: var(--radius-sm);
+}
+.message-tool {
+  align-self: flex-start;
+  background: var(--color-surface);
+  color: var(--color-text-muted);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  border-left: 3px solid var(--color-accent);
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+}
+.message-error {
+  align-self: center;
+  background: rgba(239, 68, 68, 0.1);
+  color: var(--color-danger);
+  font-size: var(--text-xs);
+  text-align: center;
+}

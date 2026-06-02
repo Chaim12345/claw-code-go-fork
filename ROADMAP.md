@@ -163,7 +163,7 @@ viewport with touch input, and gracefully scale up to desktop.
   env(safe-area-inset-bottom))` on the composer. Add a CSS env
   test page (`/safe-area-test`) that draws the safe-area outlines
   for visual verification.
-- [ ] **Virtual keyboard handling**: use `visualViewport` API to
+- [x] **Virtual keyboard handling**: use `visualViewport` API to
   detect the keyboard and resize the composer / scroll-to-bottom on
   `resize` event. Add a test that mounts a mock visualViewport and
   asserts the composer height adjusts.
