@@ -345,3 +345,33 @@ cover but the research showed are important.
   Prometheus metrics.
 - `go test ./...` passes.
 - The README's Web UI section is up to date.
+
+## Blockers
+
+### Phase 1 item 2 (Implement `/api/chat/ws`) and item 3 (Go tests)
+
+**Blocker**: The `ConversationLoop` type does not exist in the
+codebase. The spec says the chat WS handler must "Build a
+`ConversationLoop` using the same auth/provider/model resolution as
+the existing PTY path" and the `runChatSession` function signature
+requires a `*ConversationLoop`. The current `internal/web` package
+spawns a PTY + child process (`claw-code-go --repl`) — there is no
+in-process `ConversationLoop` abstraction available to wire up.
+
+**What's needed**: A `ConversationLoop` type (or equivalent) in
+`internal/runtime/` (or similar) that:
+- Resolves auth/provider/model from env/flags (same as the PTY path)
+- Runs a conversation turn-by-turn
+- Exposes `SendMessage`, `PermReply`, and a `TurnEvent` channel
+- Is importable by `internal/web`
+
+**What was completed despite the blocker**:
+- `internal/web/chatproto/protocol.go` defines the full wire format
+  (`ClientInbound`, `ServerOutbound`, and all message type constants)
+- The existing `server.go` has a WS upgrade pattern ready to adapt
+
+**Next iteration should**: Either implement `ConversationLoop` in a
+new package, or add the chat WS handler using the existing PTY-spawn
+approach with a JSON protocol wrapper. The `runChatSession` function
+signature should remain testable with a `json.Encoder`/`Decoder`
+pair.
