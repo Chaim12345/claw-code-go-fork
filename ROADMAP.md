@@ -71,7 +71,7 @@ The current `/ws` endpoint streams raw PTY bytes. Add a parallel
 suitable for a custom HTML/JS chat UI. The two endpoints share the
 same `ConversationLoop` — only the wire format differs.
 
-- [ ] **Define a JSON wire format** for chat events in a new file
+- [x] **Define a JSON wire format** for chat events in a new file
   `internal/web/chatproto/protocol.go`. Schema:
     - client → server: `{type:"user_input", text:"..."}`,
       `{type:"permission_reply", tool_use_id:"...", decision:"allow|deny|allow_always"}`,
