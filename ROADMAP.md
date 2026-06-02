@@ -124,7 +124,7 @@ same `ConversationLoop` — only the wire format differs.
   `X-Frame-Options: DENY`, `Permissions-Policy: camera=(),
   microphone=(), geolocation=()`. The wasm-unsafe-eval is required
   for wterm.
-- [ ] **Rate limiting** in `internal/web/ratelimit.go`: per-IP token
+- [x] **Rate limiting** in `internal/web/ratelimit.go`: per-IP token
   bucket for the chat WS endpoint (e.g. 5 new sessions per minute,
   60 messages per minute). Use `golang.org/x/time/rate` (add the
   dep). Configurable via `CLAW_WEB_RATE_RPM`.

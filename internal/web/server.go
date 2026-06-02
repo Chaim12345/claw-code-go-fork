@@ -68,6 +68,8 @@ type Server struct {
 	// runtime loop (e.g. in cmd/claw-code-go/main.go).
 	ChatLoopFactory func() *runtime.ConversationLoop
 
+	rateLimiter *rateLimiter
+
 	mu        sync.Mutex
 	sessions  map[*ptySession]struct{}
 }
@@ -81,9 +83,10 @@ func NewServer(cfg Config) *Server {
 		cfg.BinaryPath = os.Args[0]
 	}
 	return &Server{
-		cfg:      cfg,
-		upgrader: websocket.Upgrader{CheckOrigin: func(r *http.Request) bool { return true }},
-		sessions: make(map[*ptySession]struct{}),
+		cfg:         cfg,
+		upgrader:    websocket.Upgrader{CheckOrigin: func(r *http.Request) bool { return true }},
+		rateLimiter: newRateLimiter(),
+		sessions:    make(map[*ptySession]struct{}),
 	}
 }
 
@@ -132,7 +135,7 @@ func (s *Server) routes() http.Handler {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("ok"))
 	})
-	return securityHeadersMiddleware(basicAuthMiddleware(mux))
+	return s.rateLimiter.middleware(securityHeadersMiddleware(basicAuthMiddleware(mux)))
 }
 
 func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
