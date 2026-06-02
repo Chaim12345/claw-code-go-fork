@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"os"
+	"strings"
 	"text/template"
 )
 
@@ -91,6 +92,21 @@ func readRalphSpec(path string) (string, error) {
 		return "", err
 	}
 	return string(b), nil
+}
+
+// RalphDetectedSentinel returns true if the sentinel token appears
+// on its own line (allowing leading/trailing whitespace). False
+// otherwise. Case-sensitive.
+//
+// This is the completion signal — the model emits it only when it
+// believes the spec is fully implemented.
+func RalphDetectedSentinel(text, sentinel string) bool {
+	for _, line := range strings.Split(text, "\n") {
+		if strings.TrimSpace(line) == sentinel {
+			return true
+		}
+	}
+	return false
 }
 
 // RenderRalphPrompt executes the prompt template with the spec

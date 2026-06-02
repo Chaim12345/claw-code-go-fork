@@ -50,3 +50,25 @@ func TestRenderRalphPrompt_RejectsBadTemplate(t *testing.T) {
 		t.Error("expected error on bad template")
 	}
 }
+
+func TestRalphDetectsSentinel(t *testing.T) {
+	cfg := DefaultRalphConfig()
+	cases := []struct {
+		text     string
+		expected bool
+	}{
+		{"I marked item done.\nRALPH_DONE\n", true},
+		{"RALPH_DONE", true},
+		{"  RALPH_DONE  \n", true},
+		{"RALPH_DONE_NEAR_BUT_NOT_IT", false},
+		{"I should now RALPH_DONE with the spec but didn't on its own line", false},
+		{"", false},
+		{"ralph_done", false}, // case-sensitive on purpose
+	}
+	for _, c := range cases {
+		got := RalphDetectedSentinel(c.text, cfg.DoneSentinel)
+		if got != c.expected {
+			t.Errorf("for %q: got %v, want %v", c.text, got, c.expected)
+		}
+	}
+}
