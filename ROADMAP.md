@@ -152,7 +152,7 @@ viewport with touch input, and gracefully scale up to desktop.
   properties for colors, spacing, type scale. Light + dark mode
   via `prefers-color-scheme` AND a manual toggle persisted in
   `localStorage`. Use `clamp()` for fluid typography.
-- [ ] **Responsive layout** with `display: grid`:
+- [x] **Responsive layout** with `display: grid`:
   - mobile (< 768px): full-width, single column, sticky composer at
     bottom, hamburger menu for sidebar.
   - tablet (768-1024px): sidebar visible, content centered.
