@@ -55,11 +55,12 @@ mode.
 - [x] **Research PWA + offline for chat apps**: `web_fetch` the MDN PWA
   guide and any "installable chat app" tutorials. Add bullets to
   `WEB_RESEARCH.md`.
-- [ ] **Rewrite this ROADMAP.md based on research findings.** Add new
+- [x] **Rewrite this ROADMAP.md based on research findings.** Add new
   checkboxes at the end of each phase (or new phases) for anything
   the research surfaced that the original list missed. Re-prioritize
   items if research shows a different order is wiser. Do not remove
   items unless the research explicitly contradicts them.
+  **Added items**: See "## Items Added from Research" section at end of this document.
 
 ---
 
@@ -288,6 +289,45 @@ viewport with touch input, and gracefully scale up to desktop.
   viewport (iPhone 14 size), sends a message, screenshots the
   result, and diffs against `web/e2e/baselines/`. Document how to
   regenerate baselines.
+
+---
+
+## Items Added from Research
+
+The following items were added after reviewing the research findings
+in `WEB_RESEARCH.md`. They address gaps the original spec didn't
+cover but the research showed are important.
+
+### Phase 3 additions — Mobile chat UI
+
+- [ ] **Suggested follow-up chips**: after each AI response, render
+  tappable chip buttons with suggested follow-up questions (Perplexity
+  pattern). Reduces typing friction on mobile. Implement in
+  `chat.html` JS.
+- [ ] **Thinking/status indicator with elapsed time**: show a small
+  indicator (e.g. "Thinking… 12s") during long model calls, visible
+  in the message stream. Distinct from the Phase 6 empty-state
+  placeholder — this is an in-stream element. Research shows ChatGPT
+  and Perplexity both do this.
+
+### Phase 4 additions — PWA & offline
+
+- [ ] **Network status detection**: add `navigator.onLine` +
+  `online`/`offline` event listeners to show a persistent offline
+  banner when connectivity is lost. Gating logic: always confirm with
+  an actual fetch/WS failure, since `navigator.onLine` has false
+  positives.
+- [ ] **iOS "Add to Home Screen" instruction banner**: a one-time
+  dismissible banner that shows iOS Safari users how to install
+  (tap Share → "Add to Home Screen"). Only shown on iOS Safari,
+  hidden after dismissal (stored in `localStorage`).
+
+### Phase 7 additions — Tests & CI
+
+- [ ] **PWA installability audit**: add a `web/lighthouse` Makefile
+  target that runs Lighthouse (or `@lhci/cli`) against a running
+  server and asserts PWA installability score ≥ 90. Document in
+  `docs/web-deployment.md`.
 
 ---
 
