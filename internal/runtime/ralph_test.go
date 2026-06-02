@@ -72,3 +72,24 @@ func TestRalphDetectsSentinel(t *testing.T) {
 		}
 	}
 }
+
+func TestRalphSpecIsComplete(t *testing.T) {
+	cases := []struct {
+		name     string
+		spec     string
+		expected bool
+	}{
+		{"all-checked", "- [x] one\n- [x] two\n", true},
+		{"some-unchecked", "- [x] one\n- [ ] two\n", false},
+		{"no-items", "## Notes\nJust prose here.\n", true},
+		{"mixed-todos", "- [x] done\n- [TODO] pending\n- [ ] pending2\n", false},
+		{"empty", "", true},
+		{"only-completed-heading", "## Completed\n- [x] one\n", true},
+	}
+	for _, c := range cases {
+		got := RalphSpecIsComplete(c.spec)
+		if got != c.expected {
+			t.Errorf("%s: got %v, want %v", c.name, got, c.expected)
+		}
+	}
+}

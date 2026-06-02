@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"os"
+	"regexp"
 	"strings"
 	"text/template"
 )
@@ -107,6 +108,23 @@ func RalphDetectedSentinel(text, sentinel string) bool {
 		}
 	}
 	return false
+}
+
+// A spec is "complete" when every line matching a checkbox or
+// TODO marker shows it done. We are conservative: any line that
+// looks like an open task (- [ ], - [TODO], * [ ], 1. [ ], etc.)
+// makes the spec incomplete.
+//
+// We do NOT use this as the primary completion signal (the
+// sentinel is). It's a safety net — if the model never emits
+// the sentinel, we can still detect a spec where every line is
+// marked done.
+var openTaskPattern = regexp.MustCompile(`(?m)^\s*(?:-|\*|\d+\.)\s+\[(?:\s|todo|pending|wip)\]`)
+
+// RalphSpecIsComplete returns true if no open task markers are
+// present in the spec body. Empty or all-checked specs return true.
+func RalphSpecIsComplete(spec string) bool {
+	return !openTaskPattern.MatchString(spec)
 }
 
 // RenderRalphPrompt executes the prompt template with the spec
