@@ -1,0 +1,21 @@
+{
+  "name": "mimo-cli",
+  "version": "0.1.0",
+  "description": "End-to-end Puppeteer CLI to map the Xiaomi MiMo Studio web UI and reverse its internal API",
+  "type": "module",
+  "bin": {
+    "mimo-cli": "./src/cli.js"
+  },
+  "scripts": {
+    "start": "node src/cli.js",
+    "map": "node src/cli.js map"
+  },
+  "dependencies": {
+    "chrome-devtools-mcp": "^1.1.1",
+    "puppeteer": "^24.0.0",
+    "ws": "^8.21.0"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

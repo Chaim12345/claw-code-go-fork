@@ -1,0 +1,303 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="Xiaomi MiMo Claw免责条款 - Xiaomi MiMo Studio">
+  <title>Xiaomi MiMo Claw免责条款 - Xiaomi MiMo Studio</title>
+  
+  <style>
+    /* 自定义样式 */
+    :root {
+      --scrollbar-track: transparent;
+      --scrollbar-thumb: rgba(190, 190, 190, 0.85);
+      --scrollbar-thumb-hover: rgba(160, 160, 160, 0.85);
+    }
+    
+    .dark {
+      --scrollbar-track: transparent;
+      --scrollbar-thumb: rgba(80, 80, 80, 0.85);
+      --scrollbar-thumb-hover: rgba(110, 110, 110, 0.85);
+    }
+    
+    body {
+      font-family: -apple-system, 'PingFang SC', 'Microsoft YaHei', sans-serif;
+      margin: 0;
+      padding: 0;
+      background-color: #ffffff;
+      color: #171717;
+      transition: background-color 0.2s, color 0.2s;
+    }
+    
+    .dark body {
+      background-color: #000000;
+      color: #fafafa;
+    }
+    
+    main {
+      margin: 0 auto;
+      min-height: 100vh;
+      max-width: 56rem;
+      padding: 2rem 1rem 2.5rem;
+    }
+    
+    article {
+      user-select: text;
+    }
+    
+    /* 滚动条样式 */
+    ::-webkit-scrollbar {
+      width: 5px;
+      height: 5px;
+    }
+    
+    ::-webkit-scrollbar-track {
+      background-color: var(--scrollbar-track);
+    }
+    
+    ::-webkit-scrollbar-thumb {
+      background-color: var(--scrollbar-thumb);
+      border-radius: 9999px;
+    }
+    
+    ::-webkit-scrollbar-thumb:hover {
+      background-color: var(--scrollbar-thumb-hover);
+    }
+    
+    /* Markdown 内容样式 */
+    .markdown-content {
+      max-width: 100%;
+    }
+    
+    .markdown-content h1 {
+      font-size: 1.5rem;
+      font-weight: 700;
+      margin-top: 2rem;
+      margin-bottom: 1rem;
+      color: inherit;
+    }
+    
+    .markdown-content h2 {
+      font-size: 1.25rem;
+      font-weight: 600;
+      margin-top: 1.75rem;
+      margin-bottom: 0.875rem;
+      color: inherit;
+    }
+    
+    .markdown-content h3 {
+      font-size: 1rem;
+      font-weight: 600;
+      margin-top: 1.5rem;
+      margin-bottom: 0.75rem;
+      color: inherit;
+    }
+    
+    .markdown-content h4,
+    .markdown-content h5,
+    .markdown-content h6 {
+      font-size: 1rem;
+      font-weight: 600;
+      margin-top: 1.25rem;
+      margin-bottom: 0.5rem;
+      color: inherit;
+    }
+    
+    .markdown-content p {
+      margin-bottom: 1rem;
+      line-height: 1.75;
+    }
+    
+    .markdown-content a {
+      color: #2563eb;
+      text-decoration: none;
+    }
+    
+    .markdown-content a:hover {
+      text-decoration: underline;
+    }
+    
+    .dark .markdown-content a {
+      color: #60a5fa;
+    }
+    
+    .markdown-content strong {
+      font-weight: 600;
+    }
+    
+    .markdown-content ul,
+    .markdown-content ol {
+      margin-bottom: 1rem;
+      padding-left: 1.5rem;
+    }
+    
+    .markdown-content ul {
+      list-style-type: disc;
+    }
+    
+    .markdown-content ol {
+      list-style-type: decimal;
+    }
+    
+    .markdown-content li {
+      margin-bottom: 0.5rem;
+      line-height: 1.75;
+    }
+    
+    .markdown-content code {
+      background-color: rgba(209, 213, 219, 0.3);
+      padding: 0.125rem 0.25rem;
+      border-radius: 0.25rem;
+      font-size: 0.875em;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    }
+    
+    .dark .markdown-content code {
+      background-color: rgba(55, 65, 81, 0.5);
+    }
+    
+    .markdown-content pre {
+      background-color: rgba(243, 244, 246, 1);
+      padding: 1rem;
+      border-radius: 0.5rem;
+      overflow-x: auto;
+      margin-bottom: 1rem;
+    }
+    
+    .dark .markdown-content pre {
+      background-color: rgba(31, 41, 55, 1);
+    }
+    
+    .markdown-content pre code {
+      background-color: transparent;
+      padding: 0;
+    }
+    
+    .markdown-content blockquote {
+      border-left: 4px solid #d1d5db;
+      padding-left: 1rem;
+      margin: 1rem 0;
+      color: #6b7280;
+    }
+    
+    .dark .markdown-content blockquote {
+      border-left-color: #4b5563;
+      color: #9ca3af;
+    }
+    
+    .markdown-content table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-bottom: 1rem;
+    }
+    
+    .markdown-content th,
+    .markdown-content td {
+      border: 1px solid #e5e7eb;
+      padding: 0.5rem;
+      text-align: left;
+    }
+    
+    .dark .markdown-content th,
+    .dark .markdown-content td {
+      border-color: #374151;
+    }
+    
+    .markdown-content th {
+      background-color: #f9fafb;
+      font-weight: 600;
+    }
+    
+    .dark .markdown-content th {
+      background-color: #1f2937;
+    }
+    
+    .markdown-content hr {
+      border: none;
+      border-top: 1px solid #e5e7eb;
+      margin: 2rem 0;
+    }
+    
+    .dark .markdown-content hr {
+      border-top-color: #374151;
+    }
+    
+    /* div 标签支持 */
+    .markdown-content div {
+      margin-bottom: 0.5rem;
+    }
+  </style>
+</head>
+<body>
+  <!-- 主内容区域 -->
+  <main>
+    <article class="markdown-content">
+      <h1>Xiaomi MiMo Claw免责条款</h1>
+<p>欢迎您使用“Xiaomi MiMo Claw”服务。本服务条款适用于您在Xiaomi MiMo Studio使用Xiaomi MiMo Claw服务，与Xiaomi MiMo Studio 隐私政策、Xiaomi MiMo Studio 用户协议等所适用的其他协议，共同构成您与Xiaomi MiMo之间就使用本服务的完整协议。请您务必仔细阅读并充分理解本协议，特别是涉及免除或者减轻我们责任、排除或限制您的权利的与您有重大利害的条款。该等条款将以加粗等形式特别提示您注意，请您重点阅读。<br>
+Xiaomi MiMo Claw（“本服务”）是Xiaomi MiMo Studio（以下简称“小米”）基于Xiaomi MiMo大模型能力为您提供的AI助手功能，您可以通过自然语言与Xiaomi MiMo Claw进行对话，并配置您需要的Skills，完成AI 助手功能。<br>
+<strong>受限于现有技术，本服务仅按照“现状”和“现有”提供。在法律允许的最大范围内，我们不承担任何明示或默示的保证、条件或其他协定，也未就此作出任何承诺、声明或保证，包括对本服务及相关功能的完整性、准确性、及时性或可靠性等。您需自行评估和判断您使用本服务处理数据和内容的风险并自行承担因此造成的一切后果。</strong><br>
+您仅可基于体验或个人使用目的使用本服务，未经小米书面同意，您不得将本服务用于其他场景。<br>
+特别提示您，您在使用本服务时应遵守相关法律法规，不得利用本服务侵犯第三方合法权益。为了您的数据安全，请您不要使用此服务处理个人信息、商业秘密或其他敏感信息。<br>
+<strong>第三方软件或技术</strong><br>
+您可能会通过本服务调用第三方软件或技术（包括但不限于可能使用的开源代码和公共领域代码等）支持您的使用或访问。<br>
+<strong>您确认并承诺，如您自行安装或使用任何第三方软件或服务（包括您下载安装开源社区或第三方Skills等），您需自行遵守第三方软件或服务的服务协议或使用规则。特别提醒您，您需谨慎选择第三方Skills，充分评估后进行使用，小米对您使用第三方软件或服务的行为及导致的任何后果不承担任何责任。<br>
+您须理解并同意，在使用第三方服务时，第三方可能会对您数据进行读取，小米不保证通过第三方系统或第三方软件支持实现的结果的安全性、 准确性、有效性，您应审慎判断，由此引发的任何争议及损害，小米不承担任何责任。<br>
+您同意严格按照本协议约定的方式和范围使用本服务，对采用非常规手段影响本服务正常运行的行为，小米有权在提示后限制您继续使用。<br>
+小米公司拥有随时修改或中断服务而无需提前通知您的权利，因小米行使修改或中断服务的权利而导致本服务无法访问或使用造成的损失，小米无需对您或任何第三方负责。</strong><br>
+如果您有任何问题和意见，请随时通过“Xiaomi MiMo Studio网站首页-账户头像-用户反馈”联系我们。感谢您的理解和支持。</p>
+<p>更新时间：2026年3月18日</p>
+
+    </article>
+  </main>
+  
+  <script>
+    // 主题控制逻辑 - 支持 URL 参数
+    const htmlElement = document.documentElement;
+    
+    // 从 URL 参数读取主题设置
+    const getThemeFromURL = () => {
+      const params = new URLSearchParams(window.location.search);
+      const theme = params.get('theme');
+      return theme === 'dark' || theme === 'light' ? theme : null;
+    };
+    
+    // 从 localStorage 读取主题设置
+    const getThemeFromStorage = () => {
+      return localStorage.getItem('theme');
+    };
+    
+    // 获取系统主题
+    const getSystemTheme = () => {
+      return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+    };
+    
+    // 获取最终主题：URL 参数 > localStorage > 系统主题
+    const getTheme = () => {
+      return getThemeFromURL() || getThemeFromStorage() || getSystemTheme();
+    };
+    
+    // 应用主题
+    const applyTheme = (theme) => {
+      if (theme === 'dark') {
+        htmlElement.classList.add('dark');
+      } else {
+        htmlElement.classList.remove('dark');
+      }
+      // 如果 URL 没有指定主题，则保存到 localStorage
+      if (!getThemeFromURL()) {
+        localStorage.setItem('theme', theme);
+      }
+    };
+    
+    // 初始化主题
+    applyTheme(getTheme());
+    
+    // 监听系统主题变化（仅在没有 URL 参数和 localStorage 设置时生效）
+    window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', (e) => {
+      if (!getThemeFromURL() && !getThemeFromStorage()) {
+        applyTheme(e.matches ? 'dark' : 'light');
+      }
+    });
+  </script>
+</body>
+</html>

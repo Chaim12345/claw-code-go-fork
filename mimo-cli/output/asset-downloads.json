@@ -1,0 +1,146 @@
+[
+  {
+    "url": "https://aistudio.xiaomimimo.com/4440.67356a96.chunk.js",
+    "local": "4440.67356a96.chunk.js",
+    "status": 200,
+    "size": 14096
+  },
+  {
+    "url": "https://aistudio.xiaomimimo.com/4358.79e2bb3d.chunk.css",
+    "local": "4358.79e2bb3d.chunk.css",
+    "status": 200,
+    "size": 23545
+  },
+  {
+    "url": "https://aistudio.xiaomimimo.com/4358.69282b0f.chunk.js",
+    "local": "4358.69282b0f.chunk.js",
+    "status": 200,
+    "size": 4297222
+  },
+  {
+    "url": "https://aistudio.xiaomimimo.com/main.796b2ed9.chunk.css",
+    "local": "main.796b2ed9.chunk.css",
+    "status": 200,
+    "size": 2168058
+  },
+  {
+    "url": "https://aistudio.xiaomimimo.com/main.192e44f5.chunk.js",
+    "local": "main.192e44f5.chunk.js",
+    "status": 200,
+    "size": 613508
+  },
+  {
+    "url": "https://aistudio.xiaomimimo.com/1627.aed499ff.chunk.js",
+    "local": "1627.aed499ff.chunk.js",
+    "status": 200,
+    "size": 727117
+  },
+  {
+    "url": "https://aistudio.xiaomimimo.com/4442.cd47c5f0.chunk.js",
+    "local": "4442.cd47c5f0.chunk.js",
+    "status": 200,
+    "size": 12750
+  },
+  {
+    "url": "https://aistudio.xiaomimimo.com/2607.937f4c1f.chunk.js",
+    "local": "2607.937f4c1f.chunk.js",
+    "status": 200,
+    "size": 62804
+  },
+  {
+    "url": "https://aistudio.xiaomimimo.com/9779.30fc1413.chunk.css",
+    "local": "9779.30fc1413.chunk.css",
+    "status": 200,
+    "size": 337
+  },
+  {
+    "url": "https://aistudio.xiaomimimo.com/9779.da090290.chunk.js",
+    "local": "9779.da090290.chunk.js",
+    "status": 200,
+    "size": 67112
+  },
+  {
+    "url": "https://aistudio.xiaomimimo.com/logo.d8da8623.webp",
+    "local": "logo.d8da8623.webp",
+    "status": 200,
+    "size": 43182
+  },
+  {
+    "url": "https://aistudio.xiaomimimo.com/logoDark.7bbe3994.webp",
+    "local": "logoDark.7bbe3994.webp",
+    "status": 200,
+    "size": 43188
+  },
+  {
+    "url": "https://aistudio.xiaomimimo.com/8209.46064783.chunk.js",
+    "local": "8209.46064783.chunk.js",
+    "status": 200,
+    "size": 5513
+  },
+  {
+    "url": "https://aistudio.xiaomimimo.com/favicon.0619b0d2.png",
+    "local": "favicon.0619b0d2.png",
+    "status": 200,
+    "size": 29959
+  },
+  {
+    "url": "https://aistudio-cdn.xiaomimimo.com/xiaomimimo-static/ffmpeg-audio/ffmpeg-core.js",
+    "local": "xiaomimimo-static/ffmpeg-audio/ffmpeg-core.js",
+    "status": 200,
+    "size": 207929
+  },
+  {
+    "url": "https://cdn.alsgp0.fds.api.mi-img.com/user-avatar/c5ec98f1-5b3d-4d92-a4ef-79c405c0c748.jpg",
+    "local": "user-avatar/c5ec98f1-5b3d-4d92-a4ef-79c405c0c748.jpg",
+    "status": 200,
+    "size": 468
+  },
+  {
+    "url": "https://aistudio.xiaomimimo.com/new-model-announcement.3050e7e5.png",
+    "local": "new-model-announcement.3050e7e5.png",
+    "status": 200,
+    "size": 20241
+  },
+  {
+    "url": "https://aistudio-cdn.xiaomimimo.com/xiaomimimo-static/ffmpeg-audio/ffmpeg-core.wasm",
+    "local": "xiaomimimo-static/ffmpeg-audio/ffmpeg-core.wasm",
+    "status": 200,
+    "size": 3289962
+  },
+  {
+    "url": "https://aistudio.xiaomimimo.com/banner-bg-ellipse-rb.3d8d9fed.png",
+    "local": "banner-bg-ellipse-rb.3d8d9fed.png",
+    "status": 200,
+    "size": 79812
+  },
+  {
+    "url": "https://aistudio.xiaomimimo.com/banner-bg-ellipse-rb-dark.6452e296.webp",
+    "local": "banner-bg-ellipse-rb-dark.6452e296.webp",
+    "status": 200,
+    "size": 86208
+  },
+  {
+    "url": "https://aistudio.xiaomimimo.com/banner-bg-ellipse-lt.9eabc499.png",
+    "local": "banner-bg-ellipse-lt.9eabc499.png",
+    "status": 200,
+    "size": 112156
+  },
+  {
+    "url": "https://aistudio.xiaomimimo.com/banner-bg-ellipse-lt-dark.ae418ccc.webp",
+    "local": "banner-bg-ellipse-lt-dark.ae418ccc.webp",
+    "status": 200,
+    "size": 90878
+  },
+  {
+    "url": "https://aistudio.xiaomimimo.com/claw.a93b6177.webp",
+    "local": "claw.a93b6177.webp",
+    "status": 200,
+    "size": 251320
+  },
+  {
+    "url": "https://aistudio.xiaomimimo.com/favicon.ico",
+    "local": "favicon.ico",
+    "status": 404,
+    "error": "http 404"
+  }
+]

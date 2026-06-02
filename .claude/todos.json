@@ -1,0 +1,14 @@
+[
+  {
+    "id": "1",
+    "content": "Identify and fix the root cause of premature turn termination (markdown-fence tool calls mapping to 'input' instead of correct parameter name)",
+    "status": "done",
+    "priority": "high"
+  },
+  {
+    "id": "2",
+    "content": "Verify the fix resolves the premature termination loop",
+    "status": "done",
+    "priority": "high"
+  }
+]

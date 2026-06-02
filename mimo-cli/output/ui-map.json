@@ -1,0 +1,308 @@
+[
+  {
+    "id": 1,
+    "route": "/",
+    "url": "https://aistudio.xiaomimimo.com/",
+    "ts": 1780323662295,
+    "snapshot": {
+      "title": "Xiaomi MiMo Studio",
+      "url": "https://aistudio.xiaomimimo.com/#/",
+      "h1": [],
+      "bodyText": "MiMo Claw\nFree Trial\nMiMo Chat\n\nHistory\n\nBeat Post-Lunch Drowsiness Tips\nTool Function JSON Schema Description\n10YuanBudgetMeals\nTips to Avoid PostLunch Sleepiness\nThrough Away\n\nXiaomi MiMo-V2.5 Now Available: MiMo-V2.5-Pro with significantly enhanced long-horizon reasoning & Agent; MiMo-V2.5 full-modality 1M context; MiMo-V2.5-TTS series now with voice cloning & fine-grained control\n\nYour personal assistant: document generation, news aggregation, content creation, development efficiency, data analysis\n— unlocking endless possibilities.\n\nCreate Now\nMiMo Flagship Model\n\nPowered by the latest MiMo-V2.5-Pro base model and MiMo-V2.5 multimodal understanding model\n\nFree Trial · Instant Deployment\n\nOne-click deployment of OpenClaw, experience “Claw” at zero cost; built-in diverse skills for effortless completion of complex tasks\n\nXiaomi x Kingsoft Ecosystem Collaboration\n\nWebOffice document preview supports Word, Excel, PPT, and PDF — covering over 95% of document formats\n\nDeveloper demo platform for model showcases. Not a formal AI assistant. AI-generated content only.\nWe use cookies and similar technologies of our own to ensure the proper functioning of the website, customize content according to user preferences and analyze users' interactions on the website, as well as their browsing habits. You can find more information in our Cookie Policy. Select an option or go to Cookie Settings to manage your preferences. Learn More.\nCookie Setting\nAccept All\nDecline All",
+      "interactive": [
+        {
+          "tag": "BUTTON",
+          "text": "MiMo Claw\nFree Trial",
+          "href": null,
+          "aria": "MiMo Claw",
+          "cls": "flex items-center gap-2 rounded-md p-2 text-sm font-normal text-mimo-text-h1-tit",
+          "visible": true
+        },
+        {
+          "tag": "BUTTON",
+          "text": "MiMo Chat",
+          "href": null,
+          "aria": "MiMo Chat",
+          "cls": "flex items-center gap-2 rounded-md p-2 text-sm font-normal text-mimo-text-h1-tit",
+          "visible": true
+        },
+        {
+          "tag": "BUTTON",
+          "text": "Through Away",
+          "href": null,
+          "aria": null,
+          "cls": "inline-flex relative items-center outline-none select-none cursor-pointer px-4 t",
+          "visible": true
+        },
+        {
+          "tag": "BUTTON",
+          "text": "Create Now",
+          "href": null,
+          "aria": null,
+          "cls": "ml-4 flex-none rounded-md bg-mimo-btn-primary-bg-default px-5 py-[0.3125rem] min",
+          "visible": true
+        },
+        {
+          "tag": "A",
+          "text": "Learn More",
+          "href": "#",
+          "aria": null,
+          "cls": "text-xs text-blue-600 underline hover:text-blue-700 dark:text-blue-400 dark:hove",
+          "visible": true
+        },
+        {
+          "tag": "BUTTON",
+          "text": "Cookie Setting",
+          "href": null,
+          "aria": null,
+          "cls": "cursor-pointer border-none bg-transparent p-0 text-xs font-medium text-gray-700 ",
+          "visible": true
+        },
+        {
+          "tag": "BUTTON",
+          "text": "Accept All",
+          "href": null,
+          "aria": null,
+          "cls": "inline-flex relative justify-center items-center outline-none select-none cursor",
+          "visible": false
+        },
+        {
+          "tag": "BUTTON",
+          "text": "Decline All",
+          "href": null,
+          "aria": null,
+          "cls": "inline-flex relative justify-center items-center outline-none select-none cursor",
+          "visible": false
+        },
+        {
+          "tag": "BUTTON",
+          "text": "Accept All",
+          "href": null,
+          "aria": null,
+          "cls": "inline-flex relative justify-center items-center outline-none select-none cursor",
+          "visible": true
+        },
+        {
+          "tag": "BUTTON",
+          "text": "Decline All",
+          "href": null,
+          "aria": null,
+          "cls": "inline-flex relative justify-center items-center outline-none select-none cursor",
+          "visible": true
+        }
+      ],
+      "forms": [],
+      "sections": [],
+      "componentCounts": [
+        [
+          "mimo-text-h",
+          10
+        ],
+        [
+          "mimo-icon-n",
+          7
+        ],
+        [
+          "mimo-fill-neutral-hover",
+          7
+        ],
+        [
+          "mimo-bg-body",
+          5
+        ],
+        [
+          "mimo-bg-card",
+          4
+        ],
+        [
+          "mimo-bg-concent-base",
+          2
+        ],
+        [
+          "mimo-fill-neutral-active",
+          1
+        ],
+        [
+          "mimo-tag-gradient-bg",
+          1
+        ],
+        [
+          "mimo-tag-gradient-border",
+          1
+        ],
+        [
+          "mimo-btn-primary-bg-default",
+          1
+        ],
+        [
+          "mimo-btn-primary-text",
+          1
+        ]
+      ]
+    },
+    "api": [
+      {
+        "url": "https://aistudio.xiaomimimo.com/open-apis/user/mi/get",
+        "method": "GET",
+        "status": 200,
+        "hasBody": false
+      },
+      {
+        "url": "https://aistudio.xiaomimimo.com/open-apis/bot/config",
+        "method": "GET",
+        "status": 200,
+        "hasBody": false
+      },
+      {
+        "url": "https://aistudio.xiaomimimo.com/open-apis/chat/conversation/list?xiaomichatbot_ph=3Jbw2viJAVhndDcXsugcJQ%3D%3D",
+        "method": "POST",
+        "status": 200,
+        "hasBody": true
+      },
+      {
+        "url": "https://aistudio.xiaomimimo.com/open-apis/user/mimo-claw/status",
+        "method": "GET",
+        "status": 200,
+        "hasBody": false
+      }
+    ],
+    "assets": [
+      {
+        "url": "https://aistudio.xiaomimimo.com/4440.67356a96.chunk.js",
+        "type": "script"
+      },
+      {
+        "url": "https://aistudio.xiaomimimo.com/4358.79e2bb3d.chunk.css",
+        "type": "stylesheet"
+      },
+      {
+        "url": "https://aistudio.xiaomimimo.com/4358.69282b0f.chunk.js",
+        "type": "script"
+      },
+      {
+        "url": "https://aistudio.xiaomimimo.com/main.796b2ed9.chunk.css",
+        "type": "stylesheet"
+      },
+      {
+        "url": "https://aistudio.xiaomimimo.com/main.192e44f5.chunk.js",
+        "type": "script"
+      },
+      {
+        "url": "https://aistudio.xiaomimimo.com/1627.aed499ff.chunk.js",
+        "type": "script"
+      },
+      {
+        "url": "https://aistudio.xiaomimimo.com/4442.cd47c5f0.chunk.js",
+        "type": "script"
+      },
+      {
+        "url": "https://aistudio.xiaomimimo.com/2607.937f4c1f.chunk.js",
+        "type": "script"
+      },
+      {
+        "url": "https://aistudio.xiaomimimo.com/9779.30fc1413.chunk.css",
+        "type": "stylesheet"
+      },
+      {
+        "url": "https://aistudio.xiaomimimo.com/9779.da090290.chunk.js",
+        "type": "script"
+      },
+      {
+        "url": "https://aistudio.xiaomimimo.com/logo.d8da8623.webp",
+        "type": "image"
+      },
+      {
+        "url": "https://aistudio.xiaomimimo.com/logoDark.7bbe3994.webp",
+        "type": "image"
+      },
+      {
+        "url": "https://aistudio.xiaomimimo.com/8209.46064783.chunk.js",
+        "type": "script"
+      },
+      {
+        "url": "https://aistudio.xiaomimimo.com/favicon.0619b0d2.png",
+        "type": "other"
+      },
+      {
+        "url": "https://aistudio.xiaomimimo.com/4440.67356a96.chunk.js",
+        "type": "other"
+      },
+      {
+        "url": "https://aistudio-cdn.xiaomimimo.com/xiaomimimo-static/ffmpeg-audio/ffmpeg-core.js",
+        "type": "other"
+      },
+      {
+        "url": "https://cdn.alsgp0.fds.api.mi-img.com/user-avatar/c5ec98f1-5b3d-4d92-a4ef-79c405c0c748.jpg",
+        "type": "image"
+      },
+      {
+        "url": "https://aistudio.xiaomimimo.com/new-model-announcement.3050e7e5.png",
+        "type": "image"
+      },
+      {
+        "url": "https://aistudio-cdn.xiaomimimo.com/xiaomimimo-static/ffmpeg-audio/ffmpeg-core.wasm",
+        "type": "other"
+      },
+      {
+        "url": "https://aistudio-cdn.xiaomimimo.com/xiaomimimo-static/ffmpeg-audio/ffmpeg-core.wasm",
+        "type": "fetch"
+      },
+      {
+        "url": "https://aistudio.xiaomimimo.com/banner-bg-ellipse-rb.3d8d9fed.png",
+        "type": "image"
+      },
+      {
+        "url": "https://aistudio.xiaomimimo.com/banner-bg-ellipse-rb-dark.6452e296.webp",
+        "type": "image"
+      },
+      {
+        "url": "https://aistudio.xiaomimimo.com/banner-bg-ellipse-lt.9eabc499.png",
+        "type": "image"
+      },
+      {
+        "url": "https://aistudio.xiaomimimo.com/banner-bg-ellipse-lt-dark.ae418ccc.webp",
+        "type": "image"
+      },
+      {
+        "url": "https://aistudio.xiaomimimo.com/claw.a93b6177.webp",
+        "type": "image"
+      }
+    ],
+    "errors": [],
+    "status": 304,
+    "title": "Xiaomi MiMo Studio"
+  },
+  {
+    "id": 2,
+    "route": "/c",
+    "url": "https://aistudio.xiaomimimo.com/c",
+    "ts": 1780323670257,
+    "snapshot": {
+      "title": "404 Not Found",
+      "url": "https://aistudio.xiaomimimo.com/c",
+      "h1": [
+        "404 Not Found"
+      ],
+      "bodyText": "404 Not Found\nopenresty",
+      "interactive": [],
+      "forms": [],
+      "sections": [
+        {
+          "level": "H1",
+          "text": "404 Not Found"
+        }
+      ],
+      "componentCounts": []
+    },
+    "api": [],
+    "assets": [
+      {
+        "url": "https://aistudio.xiaomimimo.com/favicon.ico",
+        "type": "other"
+      }
+    ],
+    "errors": [],
+    "status": 404,
+    "title": "404 Not Found"
+  }
+]

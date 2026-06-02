@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Code Preview</title>
+    <style>
+        body, html {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            border: none;
+            overflow: hidden;
+        }
+        iframe {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            border: none;
+            overflow: hidden;
+        }
+    </style>
+</head>
+<body>
+    <iframe id="preview-iframe" sandbox="allow-scripts allow-same-origin"></iframe>
+
+    <script>
+        // 定义受信任的来源以确保安全性
+        const TRUSTED_ORIGIN = 'https://aistudio.xiaomimimo.com';
+
+        // 当前主题状态
+        let currentTheme = 'light'; // 默认为浅色
+
+        // 初始化主题
+        applyTheme();
+
+        // 将主题应用到iframe的函数
+        function applyTheme() {
+            const iframe = document.getElementById('preview-iframe');
+            if (iframe) {
+                try {
+                    const doc = iframe.contentDocument || iframe.contentWindow.document;
+                    if (doc && doc.documentElement) {
+                        doc.documentElement.className = currentTheme === 'dark' ? 'dark' : '';
+                    }
+                } catch (error) {
+                    console.log('应用主题时出错:', error);
+                }
+            }
+            // 应用主题到预览页面的背景
+            document.body.style.backgroundColor = currentTheme === 'dark' ? '#000' : '#fff';
+        }
+
+        // 监听消息以更新iframe内容
+        window.addEventListener('message', function(event) {
+            // 检查来源是否受信任
+            if (event.origin !== TRUSTED_ORIGIN) {
+                console.warn('来自不受信任来源的消息:', event.origin);
+                return;
+            }
+
+            const message = event.data;
+            if (message && message.type === 'UPDATE_IFRAME_CONTENT' && message.payload && message.payload.content) {
+                // 移除现有的iframe以避免变量冲突
+                const existingIframe = document.getElementById('preview-iframe');
+                if (existingIframe) {
+                    existingIframe.remove();
+                }
+
+                // 创建新的iframe
+                const iframe = document.createElement('iframe');
+                iframe.id = 'preview-iframe';
+                iframe.sandbox = 'allow-scripts allow-same-origin';
+
+                // 将新iframe添加到body
+                document.body.appendChild(iframe);
+
+                if (iframe) {
+                    try {
+                        const doc = iframe.contentDocument || iframe.contentWindow.document;
+                        doc.open();
+                        doc.write(message.payload.content);
+                        doc.close();
+                        iframe.focus();
+                        // 在内容更新后应用当前主题
+                        applyTheme();
+                    } catch (error) {
+                        console.log('更新iframe时出错:', error);
+                    }
+                }
+            } else if (message && message.type === 'SET_THEME' && message.payload && typeof message.payload.theme === 'string') {
+                currentTheme = message.payload.theme;
+                applyTheme();
+            }
+        });
+
+        // 通知父窗口预览已准备就绪
+        window.parent.postMessage({ type: 'PREVIEW_READY' }, '*');
+    </script>
+</body>
+</html>

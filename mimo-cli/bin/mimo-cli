@@ -1,0 +1,3 @@
+#!/usr/bin/env node
+// Convenience runner so the CLI works via `./bin/mimo-cli` or `node bin/mimo-cli`
+import('../src/cli.js');

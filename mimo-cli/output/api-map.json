@@ -1,0 +1,350 @@
+{
+  "timestamp": "2026-06-01T17:30:00Z",
+  "target": "https://aistudio.xiaomimimo.com",
+  "user": {
+    "userId": "6660937153",
+    "userName": "Through Away",
+    "idc": "Singapore"
+  },
+  "pages": [
+    {
+      "route": "/",
+      "title": "Xiaomi MiMo Studio",
+      "url": "https://aistudio.xiaomimimo.com/#/",
+      "apis": [
+        "GET /open-apis/user/mi/get",
+        "GET /open-apis/bot/config",
+        "GET /open-apis/user/mimo-claw/status",
+        "POST /open-apis/chat/conversation/list"
+      ],
+      "ui": {
+        "tabs": ["MiMo Claw (Free Trial)", "MiMo Chat"],
+        "userMenu": "Through Away",
+        "heroSections": [
+          "Xiaomi MiMo-V2.5 Now Available",
+          "MiMo-V2.5-Pro with significantly enhanced long-horizon reasoning & Agent",
+          "MiMo-V2.5 full-modality 1M context",
+          "MiMo-V2.5-TTS series now with voice cloning & fine-grained control"
+        ],
+        "productSections": [
+          "Your personal assistant: document generation, news aggregation, content creation",
+          "MiMo Flagship Model - Powered by MiMo-V2.5-Pro",
+          "Free Trial - Instant Deployment - One-click deployment of OpenClaw",
+          "Xiaomi x Kingsoft Ecosystem Collaboration - WebOffice"
+        ],
+        "ctaButtons": ["Create Now"]
+      }
+    },
+    {
+      "route": "/c",
+      "title": "Xiaomi MiMo Studio",
+      "url": "https://aistudio.xiaomimimo.com/#/c",
+      "apis": [
+        "GET /open-apis/user/mi/get",
+        "GET /open-apis/bot/config",
+        "GET /open-apis/user/mimo-claw/status",
+        "POST /open-apis/chat/conversation/list",
+        "POST /open-apis/chat/conversation/save",
+        "POST /open-apis/bot/chat",
+        "POST /open-apis/chat/conversation/genTitle"
+      ],
+      "ui": {
+        "tabs": ["MiMo Claw (Free Trial)", "MiMo Chat"],
+        "sidebar": "History",
+        "textarea": "Ask me anything! Hold Shift+Enter to start a new line.",
+        "modelSelector": "MiMo-V2.5-Pro (New)",
+        "thoughtToggle": "Thought for 6.6 seconds",
+        "cookieBanner": "We use cookies and similar technologies..."
+      }
+    }
+  ],
+  "apiEndpoints": [
+    {
+      "method": "GET",
+      "path": "/open-apis/user/mi/get",
+      "description": "Get current user info",
+      "auth": "cookie (serviceToken, userId)",
+      "response": {
+        "code": 0,
+        "msg": "成功",
+        "data": {
+          "userId": "6660937153",
+          "userCode": "ce7eb297-5e99-4",
+          "userName": "Through Away",
+          "avatar": "https://cdn.alsgp0.fds.api.mi-img.com/user-avatar/c5ec98f1-5b3d-4d92-a4ef-79c405c0c748.jpg",
+          "isChildAccount": false,
+          "watermark": "be2tcRIpNrpvc6vs/lBLUw==",
+          "isAgreed": true,
+          "isClawDisclaimerAgreed": true,
+          "idc": "Singapore",
+          "bannedStatus": "NOT_BANNED"
+        }
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/open-apis/bot/config",
+      "description": "Get model configuration and available models",
+      "auth": "cookie",
+      "response": {
+        "modelConfigList": [
+          {
+            "name": "mimo-v2-flash-studio",
+            "model": "mimo-v2-flash",
+            "temperature": 0.8,
+            "topP": 0.95,
+            "thinkingDefaultOn": true,
+            "webSearchDefaultStatus": "disabled",
+            "showThinking": false,
+            "showImage": false,
+            "showFile": false,
+            "showWebSearch": false,
+            "cnIntro": "适合深度思考",
+            "enIntro": "profound in thinking",
+            "fileUpload": {
+              "enabled": true,
+              "acceptTypes": ["text/plain","application/pdf","image/jpeg","image/png","application/json","text/markdown","text/xml","application/xml","text/html","application/x-sh","text/x-python"],
+              "maxFileSize": 100,
+              "maxFileCount": 50
+            },
+            "enableOCR": true
+          },
+          {
+            "name": "mimo-v2-pro",
+            "model": "mimo-v2-pro",
+            "temperature": 0.8,
+            "topP": 0.95,
+            "thinkingDefaultOn": true,
+            "webSearchDefaultStatus": "auto",
+            "showThinking": false,
+            "showImage": false,
+            "showFile": false,
+            "showWebSearch": false,
+            "cnIntro": "适合深度思考",
+            "enIntro": "profound in thinking",
+            "fileUpload": {
+              "enabled": true,
+              "acceptTypes": ["text/plain","application/pdf","image/jpeg","image/png"],
+              "maxFileSize": 100,
+              "maxFileCount": 50
+            },
+            "enableOCR": true
+          },
+          {
+            "name": "mimo-omni",
+            "model": "mimo-v2-omni",
+            "temperature": 0.8,
+            "topP": 0.95,
+            "thinkingDefaultOn": true,
+            "webSearchDefaultStatus": "auto",
+            "showThinking": false,
+            "showImage": false,
+            "showFile": false,
+            "showWebSearch": false,
+            "cnIntro": "支持多模态生文",
+            "enIntro": "profound in thinking",
+            "fileUpload": {
+              "enabled": true,
+              "acceptTypes": ["text/plain","application/pdf","image/jpeg","image/png"],
+              "maxFileSize": 100,
+              "maxFileCount": 50
+            },
+            "enableOCR": false,
+            "enabledSceneTypeList": ["TRANSLATION","QA","VISION_QA"]
+          },
+          {
+            "name": "mimo-v2.5-pro",
+            "model": "mimo-v2.5-pro",
+            "temperature": 0.8,
+            "topP": 0.95,
+            "thinkingDefaultOn": true,
+            "webSearchDefaultStatus": "auto",
+            "showThinking": false,
+            "showImage": false,
+            "showFile": false,
+            "showWebSearch": false,
+            "cnIntro": "适合深度思考",
+            "enIntro": "profound in thinking",
+            "fileUpload": {
+              "enabled": true,
+              "acceptTypes": ["text/plain","application/pdf","image/jpeg","image/png"],
+              "maxFileSize": 100,
+              "maxFileCount": 50
+            },
+            "enableOCR": true
+          },
+          {
+            "name": "mimo-omni",
+            "model": "mimo-v2.5",
+            "temperature": 0.8,
+            "topP": 0.95,
+            "thinkingDefaultOn": true,
+            "webSearchDefaultStatus": "auto",
+            "showThinking": false,
+            "showImage": false,
+            "showFile": false,
+            "showWebSearch": false,
+            "cnIntro": "支持多模态生文",
+            "enIntro": "profound in thinking",
+            "fileUpload": {
+              "enabled": true,
+              "acceptTypes": ["text/plain","application/pdf","image/jpeg","image/png"],
+              "maxFileSize": 100,
+              "maxFileCount": 50
+            },
+            "enableOCR": false,
+            "enabledSceneTypeList": ["TRANSLATION","QA","VISION_QA"]
+          },
+          {
+            "name": "mimo-v2-flash-studio",
+            "model": "mimo-v2-flash-studio",
+            "enableOCR": true
+          },
+          {
+            "name": "mimo-omni",
+            "model": "clawm-alpha",
+            "enableOCR": false
+          },
+          {
+            "name": "mimo-V2-pro",
+            "model": "clawl-alpha",
+            "enableOCR": true
+          },
+          {
+            "name": "mimo-omni",
+            "model": "mimo-v2.1-omni",
+            "enableOCR": false
+          },
+          {
+            "name": "mimo-omni",
+            "model": "mimo-v2.1-omni-preview",
+            "enableOCR": false
+          },
+          {
+            "name": "mimo-v2.1-pro",
+            "model": "mimo-v2.1-pro",
+            "enableOCR": true
+          },
+          {
+            "name": "mimo-v2.1-pro",
+            "model": "mimo-v2.1-pro-preview",
+            "enableOCR": true
+          }
+        ]
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/open-apis/user/mimo-claw/status",
+      "description": "Check Claw agent provisioning status",
+      "auth": "cookie",
+      "response": {
+        "code": 0,
+        "msg": "成功",
+        "data": {
+          "status": "CREATE_FAILED",
+          "message": "RESOURCE_INSUFFICIENT"
+        }
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/open-apis/chat/conversation/list",
+      "description": "List chat conversations",
+      "auth": "cookie + xiaomichatbot_ph",
+      "queryParams": "xiaomichatbot_ph=3Jbw2viJAVhndDcXsugcJQ=="
+    },
+    {
+      "method": "POST",
+      "path": "/open-apis/chat/conversation/save",
+      "description": "Save/create chat conversation",
+      "auth": "cookie + xiaomichatbot_ph",
+      "queryParams": "xiaomichatbot_ph=3Jbw2viJAVhndDcXsugcJQ=="
+    },
+    {
+      "method": "POST",
+      "path": "/open-apis/bot/chat",
+      "description": "Send chat message and receive SSE stream",
+      "auth": "cookie + xiaomichatbot_ph",
+      "queryParams": "xiaomichatbot_ph=3Jbw2viJAVhndDcXsugcJQ==",
+      "requestBody": {
+        "msgId": "string (UUID)",
+        "conversationId": "string (UUID)",
+        "query": "user message text",
+        "isEditedQuery": false,
+        "modelConfig": {
+          "enableThinking": false,
+          "webSearchStatus": "disabled|auto",
+          "model": "mimo-v2.5-pro"
+        },
+        "multiMedias": []
+      },
+      "sseEventTypes": ["dialogId", "doc", "web_search", "message", "usage", "finish"],
+      "messageTypes": ["text"]
+    },
+    {
+      "method": "POST",
+      "path": "/open-apis/chat/conversation/genTitle",
+      "description": "Generate conversation title",
+      "auth": "cookie + xiaomichatbot_ph",
+      "queryParams": "xiaomichatbot_ph=3Jbw2viJAVhndDcXsugcJQ=="
+    }
+  ],
+  "modelRegistry": {
+    "acceptedByBotChat": ["mimo-v2-flash", "mimo-v2-flash-studio", "mimo-v2-pro", "mimo-v2.5", "mimo-v2.5-pro"],
+    "rejectedByBotChat": ["clawm-alpha", "clawl-alpha", "mimo-v2.1-pro", "mimo-v2.1-pro-preview", "mimo-v2.1-omni", "mimo-v2.1-omni-preview"],
+    "notes": "clawm-alpha and clawl-alpha are agent models. mimo-v2.1-* are next-gen preview models. All are listed in /open-apis/bot/config but only the 'acceptedByBotChat' models work via the /open-apis/bot/chat endpoint."
+  },
+  "authFlow": {
+    "cookies": ["serviceToken", "userId", "xiaomichatbot_ph"],
+    "cookieDomain": "aistudio.xiaomimimo.com",
+    "cookieSecure": true,
+    "cookieSameSite": "None"
+  },
+  "staticAssets": {
+    "jsChunks": [
+      "4440.67356a96.chunk.js",
+      "4358.69282b0f.chunk.js",
+      "main.192e44f5.chunk.js",
+      "1627.aed499ff.chunk.js",
+      "4442.cd47c5f0.chunk.js",
+      "2607.937f4c1f.chunk.js",
+      "9779.da090290.chunk.js",
+      "8209.46064783.chunk.js",
+      "9917.dc5d373f.chunk.js",
+      "2375.38909875.chunk.js",
+      "6152.f3a87b7b.chunk.js",
+      "3883.eef92eb5.chunk.js",
+      "1195.70f32ba8.chunk.js",
+      "6458.44c35358.chunk.js"
+    ],
+    "cssFiles": [
+      "4358.79e2bb3d.chunk.css",
+      "main.796b2ed9.chunk.css",
+      "9779.30fc1413.chunk.css",
+      "6458.c81c38ef.chunk.css"
+    ],
+    "images": [
+      "logo.d8da8623.webp",
+      "logoDark.7bbe3994.webp",
+      "new-model-announcement.3050e7e5.png",
+      "banner-bg-ellipse-rb.3d8d9fed.png",
+      "banner-bg-ellipse-rb-dark.6452e296.webp",
+      "banner-bg-ellipse-lt.9eabc499.png",
+      "banner-bg-ellipse-lt-dark.ae418ccc.webp",
+      "claw.a93b6177.webp"
+    ],
+    "externalCdn": [
+      "https://cdn.alsgp0.fds.api.mi-img.com/user-avatar/c5ec98f1-5b3d-4d92-a4ef-79c405c0c748.jpg"
+    ]
+  },
+  "toolCallingVerdict": {
+    "supported": false,
+    "evidence": "The /open-apis/bot/chat endpoint silently ignores tools/functions/tool_choice/mcpServers/parallel_tool_calls parameters. SSE stream only emits 'text' type messages - never 'tool_call' or 'function_call'. The model itself states: 'I don't have a set of callable tools or functions'. Tool calling is reserved for the gated Claw agent infrastructure (clawm-alpha, clawl-alpha) which requires separate provisioning.",
+    "workarounds": [
+      "Use OpenRouter: xiaomi/mimo-v2.5-pro with standard OpenAI tools API",
+      "Use Xiaomi's direct model API (different endpoint)",
+      "Get Claw agent provisioned (currently RESOURCE_INSUFFICIENT)"
+    ]
+  }
+}

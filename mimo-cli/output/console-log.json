@@ -1,0 +1,14 @@
+[
+  {
+    "ts": 1780323670882,
+    "type": "error",
+    "text": "Failed to load resource: the server responded with a status of 404 ()",
+    "page": 2
+  },
+  {
+    "ts": 1780323671536,
+    "type": "error",
+    "text": "Failed to load resource: the server responded with a status of 404 ()",
+    "page": 2
+  }
+]
