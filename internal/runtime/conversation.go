@@ -134,6 +134,38 @@ func (loop *ConversationLoop) allTools() []api.Tool {
 	return combined
 }
 
+// ClearSession resets the loop's local conversation state so the
+// next SendMessage starts with a clean slate — no prior user
+// messages, no prior assistant turns, no prior tool results, and
+// no accumulated token counters. The provider client is NOT
+// touched; callers wanting to also clear server-side state (e.g.
+// DeepSeek's parent_message_id chain) should additionally
+// type-assert the client to api.SessionResetter and call
+// ResetSession().
+//
+// This is what ralph loops call between iterations so each
+// iteration truly gets a fresh context (the spec on disk is the
+// only persistent memory). Without this, SendMessage accumulates
+// every prior turn and the prompt balloons past the model's cap
+// after 5-10 iterations.
+func (loop *ConversationLoop) ClearSession() {
+	if loop.Session != nil {
+		loop.Session.Messages = nil
+		loop.Session.UpdatedAt = time.Now()
+	}
+	loop.Compaction = CompactionState{}
+	loop.lastStopReason = ""
+}
+	mcpAPITools := loop.MCPRegistry.AllAPITools()
+	if len(mcpAPITools) == 0 {
+		return loop.Tools
+	}
+	combined := make([]api.Tool, 0, len(loop.Tools)+len(mcpAPITools))
+	combined = append(combined, loop.Tools...)
+	combined = append(combined, mcpAPITools...)
+	return combined
+}
+
 // SendMessage sends a user message and runs the full agentic loop.
 func (loop *ConversationLoop) SendMessage(ctx context.Context, userText string) error {
 	// Create and validate user message

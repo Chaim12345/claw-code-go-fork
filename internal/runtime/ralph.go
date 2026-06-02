@@ -574,6 +574,13 @@ func RunRalphLoop(ctx context.Context, loop *ConversationLoop, cfg RalphConfig) 
 		if resetter, ok := loop.Client.(api.SessionResetter); ok {
 			resetter.ResetSession()
 		}
+		// Also clear the loop's local message history. Without
+		// this, every prior user/assistant/tool turn accumulates
+		// in the local Messages slice and gets sent on the next
+		// prompt — even though the server-side session is
+		// fresh. With ClearSession, the next SendMessage sends
+		// ONLY the ralph prompt, keeping the request small.
+		loop.ClearSession()
 		return RalphOneIteration(ctx, loop, *cfgPtr, i, max)
 	}
 	return RunRalphLoopWithIter(ctx, cfgPtr, iter)

@@ -273,6 +273,7 @@ func runRalphSubcommand(args []string) {
 	spec := fs.String("spec", runtime.DefaultRalphSpecPath, "Path to the spec/roadmap file")
 	maxIter := fs.Int("max-iterations", runtime.DefaultRalphMaxIterations, "Maximum fresh-context iterations")
 	selfDebug := fs.Bool("self-debug", true, "After exhausting retries, run one self-debug pass where the agent sees the last error and is tasked with fixing the root cause")
+	delta := fs.Bool("delta", false, "Enable delta mode (DeepSeek only): pass cfg.DeltaMode=true to the provider. Currently a no-op for the deepseek web provider, but exposed for forward compatibility.")
 	_ = fs.Parse(args)
 
 	cfg := runtime.LoadConfig()
@@ -280,6 +281,9 @@ func runRalphSubcommand(args []string) {
 	cfg.Autonomous = true
 	if cfg.MaxTurns <= 0 {
 		cfg.MaxTurns = 5 // per-iteration turn cap
+	}
+	if *delta {
+		cfg.DeltaMode = true
 	}
 
 	provider, err := buildProvider(cfg)
@@ -295,7 +299,7 @@ func runRalphSubcommand(args []string) {
 	ralphCfg.MaxIterations = *maxIter
 	ralphCfg.SelfDebug = *selfDebug
 
-	fmt.Fprintf(os.Stderr, "[ralph] starting against %s (max %d iterations, self-debug=%v)\n", ralphCfg.SpecPath, ralphCfg.MaxIterations, ralphCfg.SelfDebug)
+	fmt.Fprintf(os.Stderr, "[ralph] starting against %s (max %d iterations, self-debug=%v, delta=%v)\n", ralphCfg.SpecPath, ralphCfg.MaxIterations, ralphCfg.SelfDebug, cfg.DeltaMode)
 	if err := runtime.RunRalphLoop(ctx, loop, ralphCfg); err != nil {
 		fmt.Fprintf(os.Stderr, "[ralph] stopped: %v\n", err)
 		os.Exit(1)
