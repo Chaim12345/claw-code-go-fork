@@ -117,7 +117,7 @@ same `ConversationLoop` — only the wire format differs.
   accept as `Authorization: Bearer ...` OR `?token=...` query
   parameter (so a browser can bookmark a session). Document that
   query-param token leaks via referer; recommend HTTPS.
-- [ ] **CSP and security headers** middleware in
+- [x] **CSP and security headers** middleware in
   `internal/web/security.go`. Add: `Content-Security-Policy`
   (default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; …),
   `X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer`,
