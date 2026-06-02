@@ -9,6 +9,7 @@ import (
 	"claw-code-go/internal/runtime"
 	"claw-code-go/internal/tools"
 	"claw-code-go/internal/tui"
+	"claw-code-go/internal/web"
 	"context"
 	"flag"
 	"fmt"
@@ -39,6 +40,9 @@ func main() {
 		case "ralph":
 			runRalphSubcommand(os.Args[2:])
 			return
+		case "web":
+			runWebSubcommand(os.Args[2:])
+			return
 		}
 	}
 
@@ -59,8 +63,9 @@ func main() {
 		fmt.Fprintf(os.Stderr, "  bootstrap-plan [--json]                 Print the ordered startup phase plan\n")
 		fmt.Fprintf(os.Stderr, "  print-system-prompt [--cwd] [--date]    Render the full system prompt\n")
 		fmt.Fprintf(os.Stderr, "  resume-session <file> [commands...]     Replay a saved session file\n")
-		fmt.Fprintf(os.Stderr, "  ralph [--spec <path>] [--max-iterations <n>]\n")
-		fmt.Fprintf(os.Stderr, "                                          Run a Ralph loop against a spec/roadmap file\n\n")
+	fmt.Fprintf(os.Stderr, "  ralph [--spec <path>] [--max-iterations <n>]\n")
+	fmt.Fprintf(os.Stderr, "                                          Run a Ralph loop against a spec/roadmap file\n")
+	fmt.Fprintf(os.Stderr, "  web [--addr <host:port>] [--cwd <dir>]   Serve the TUI in a browser via WebSocket + wterm\n\n")
 		fmt.Fprintf(os.Stderr, "Options:\n")
 		flag.PrintDefaults()
 		fmt.Fprintf(os.Stderr, "\nEnvironment variables:\n")
@@ -294,4 +299,57 @@ func runRalphSubcommand(args []string) {
 		os.Exit(1)
 	}
 	fmt.Fprintf(os.Stderr, "[ralph] done\n")
+}
+
+// runWebSubcommand starts the web server: spawns the TUI inside a PTY
+// and bridges bytes to a browser via WebSocket. The browser renders
+// the stream with wterm (Zig/WASM terminal emulator).
+func runWebSubcommand(args []string) {
+	fs := flag.NewFlagSet("web", flag.ExitOnError)
+	addr := fs.String("addr", "127.0.0.1:7777", "Listen address (host:port)")
+	cwd := fs.String("cwd", "", "Working directory for the spawned TUI (default: current dir)")
+	provider := fs.String("provider", "", "Forward --provider to the spawned TUI")
+	model := fs.String("model", "", "Forward --model to the spawned TUI")
+	_ = fs.Parse(args)
+
+	// The web subcommand itself doesn't need credentials — it just
+	// spawns the TUI in a PTY and the TUI handles auth. But we
+	// forward --provider/--model env-equivalents so the spawned
+	// process picks them up.
+	tuiArgs := []string{}
+	if *provider != "" {
+		tuiArgs = append(tuiArgs, "--provider", *provider)
+	}
+	if *model != "" {
+		tuiArgs = append(tuiArgs, "--model", *model)
+	}
+
+	exe, err := os.Executable()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: cannot resolve self path: %v\n", err)
+		os.Exit(1)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// Ctrl+C in the launching terminal: graceful shutdown.
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+	go func() {
+		<-sigCh
+		fmt.Fprintf(os.Stderr, "\n[web] shutting down…\n")
+		cancel()
+	}()
+
+	srv := web.NewServer(web.Config{
+		Addr:       *addr,
+		BinaryPath: exe,
+		Workdir:    *cwd,
+		Args:       tuiArgs,
+	})
+	if err := srv.ListenAndServe(ctx); err != nil {
+		fmt.Fprintf(os.Stderr, "[web] error: %v\n", err)
+		os.Exit(1)
+	}
 }

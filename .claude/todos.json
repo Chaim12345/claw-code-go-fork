@@ -1,44 +1,32 @@
 [
   {
     "id": "1",
-    "content": "Map codebase structure and understand architecture",
-    "status": "in_progress",
+    "content": "Review and audit mobile compatibility issues",
+    "status": "done",
     "priority": "high"
   },
   {
     "id": "2",
-    "content": "Review TUI layer for bugs (model, styles, theme, markdown, diff, etc.)",
-    "status": "pending",
+    "content": "Rewrite index.html with full mobile support: meta tags, responsive header, safe-area, virtual keyboard, touch handling",
+    "status": "in_progress",
     "priority": "high"
   },
   {
     "id": "3",
-    "content": "Review runtime layer (agent, session, conversation, compact, autonomous)",
+    "content": "Add responsive/mobile CSS with touch-friendly sizing, safe areas, and media queries",
     "status": "pending",
     "priority": "high"
   },
   {
     "id": "4",
-    "content": "Review tools layer (bash, file_edit, grep, glob, etc.)",
+    "content": "Add mobile-specific JS: virtual keyboard awareness, touch scrolling, gesture handling",
     "status": "pending",
     "priority": "high"
   },
   {
     "id": "5",
-    "content": "Review API/providers layer (deepseek, anthropic, openai, etc.)",
-    "status": "pending",
-    "priority": "high"
-  },
-  {
-    "id": "6",
-    "content": "Review MCP, auth, config, permissions, context layers",
+    "content": "Verify the server.go handles the changes correctly",
     "status": "pending",
     "priority": "medium"
-  },
-  {
-    "id": "7",
-    "content": "Compile bug report with findings",
-    "status": "pending",
-    "priority": "high"
   }
 ]

@@ -1,0 +1,192 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no" />
+  <title>claw-code-go</title>
+  <link rel="stylesheet" href="/static/css/terminal.css" />
+  <style>
+    :root {
+      color-scheme: dark;
+    }
+    * { box-sizing: border-box; }
+    html, body {
+      margin: 0;
+      padding: 0;
+      height: 100%;
+      background: #0b0b0d;
+      color: #d4d4d4;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+      overflow: hidden;
+    }
+    #app {
+      display: flex;
+      flex-direction: column;
+      height: 100vh;
+    }
+    header.bar {
+      flex: 0 0 auto;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 8px 14px;
+      background: #141418;
+      border-bottom: 1px solid #2a2a30;
+      font-size: 13px;
+    }
+    header.bar .logo { color: #ff7a59; font-weight: 600; }
+    header.bar .sep { color: #555; }
+    header.bar .spacer { flex: 1; }
+    header.bar .status { color: #888; font-variant-numeric: tabular-nums; }
+    header.bar .status.ok { color: #6fcf97; }
+    header.bar .status.err { color: #eb5757; }
+    header.bar button {
+      background: #1f1f25;
+      color: #ccc;
+      border: 1px solid #333;
+      border-radius: 4px;
+      padding: 4px 10px;
+      font-size: 12px;
+      cursor: pointer;
+    }
+    header.bar button:hover { background: #2a2a32; }
+    #term-wrap {
+      flex: 1 1 auto;
+      min-height: 0;
+      padding: 8px;
+      background: #0b0b0d;
+    }
+    #terminal {
+      width: 100%;
+      height: 100%;
+    }
+    .toast {
+      position: fixed;
+      bottom: 12px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: #2a2a32;
+      color: #ddd;
+      padding: 6px 12px;
+      border-radius: 4px;
+      border: 1px solid #444;
+      font-size: 12px;
+      pointer-events: none;
+      opacity: 0;
+      transition: opacity 200ms;
+    }
+    .toast.show { opacity: 1; }
+  </style>
+</head>
+<body>
+  <div id="app">
+    <header class="bar">
+      <span class="logo">claw-code-go</span>
+      <span class="sep">·</span>
+      <span class="status" id="conn-status">connecting…</span>
+      <span class="spacer"></span>
+      <button id="reconnect-btn" title="Drop the PTY session and start a fresh one">New session</button>
+    </header>
+    <div id="term-wrap"><div id="terminal" role="textbox" aria-label="Terminal"></div></div>
+  </div>
+  <div class="toast" id="toast"></div>
+
+  <script type="importmap">
+  {
+    "imports": {
+      "@wterm/core": "/static/js/@wterm/core/index.js",
+      "@wterm/dom":  "/static/js/@wterm/dom/index.js"
+    }
+  }
+  </script>
+  <script type="module">
+    import { WTerm } from "/static/js/@wterm/dom/wterm.js";
+
+    const termEl   = document.getElementById("terminal");
+    const statusEl = document.getElementById("conn-status");
+    const toastEl  = document.getElementById("toast");
+    const reconnectBtn = document.getElementById("reconnect-btn");
+
+    function setStatus(text, cls) {
+      statusEl.textContent = text;
+      statusEl.className = "status" + (cls ? " " + cls : "");
+    }
+
+    let toastTimer;
+    function toast(text) {
+      toastEl.textContent = text;
+      toastEl.classList.add("show");
+      clearTimeout(toastTimer);
+      toastTimer = setTimeout(() => toastEl.classList.remove("show"), 1600);
+    }
+
+    const term = new WTerm(termEl, {
+      cols: 80,
+      rows: 24,
+      autoResize: true,
+      cursorBlink: true,
+      wasmUrl: "/static/wasm/wterm.wasm",
+    });
+    await term.init();
+    term.focus();
+
+    // Sanity probe — first few bytes tell us the WASM is alive.
+    console.log("[wterm] cols=" + term.cols + " rows=" + term.rows);
+
+    function sendResize(cols, rows) {
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ type: "resize", cols, rows }));
+      }
+    }
+
+    term.onResize = (cols, rows) => sendResize(cols, rows);
+
+    let ws;
+    function connect() {
+      const proto = location.protocol === "https:" ? "wss:" : "ws:";
+      const url = `${proto}//${location.host}/ws`;
+      ws = new WebSocket(url);
+      ws.binaryType = "arraybuffer";
+      setStatus("connecting…");
+
+      ws.onopen = () => {
+        setStatus("connected", "ok");
+        sendResize(term.cols, term.rows);
+      };
+      ws.onmessage = (e) => {
+        // PTY -> wterm. Always binary from the server side.
+        const data = e.data instanceof ArrayBuffer
+          ? new TextDecoder().decode(e.data)
+          : e.data;
+        term.write(data);
+      };
+      ws.onerror = () => setStatus("error", "err");
+      ws.onclose = () => {
+        setStatus("disconnected — reconnecting in 1s", "err");
+        setTimeout(connect, 1000);
+      };
+    }
+
+    term.onData = (data) => {
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(data);
+      }
+    };
+
+    connect();
+
+    // Reconnect = drop WS, server will spawn a fresh PTY.
+    reconnectBtn.addEventListener("click", () => {
+      if (ws) ws.close();
+      // Force a fresh terminal display too.
+      term.write("\x1b[2J\x1b[H");
+      setTimeout(connect, 250);
+    });
+
+    // Page unload: leave the PTY to be reaped by the server.
+    window.addEventListener("beforeunload", () => {
+      try { ws && ws.close(); } catch (_) {}
+    });
+  </script>
+</body>
+</html>
