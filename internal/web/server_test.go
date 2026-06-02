@@ -28,6 +28,23 @@ func TestServer_IndexServesHTML(t *testing.T) {
 	}
 }
 
+func TestServer_IndexCacheControl(t *testing.T) {
+	s := NewServer(Config{Addr: "127.0.0.1:0"})
+	ts := httptest.NewServer(s.routes())
+	defer ts.Close()
+
+	resp, err := http.Get(ts.URL + "/")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+
+	cache := resp.Header.Get("Cache-Control")
+	if cache != "no-cache" {
+		t.Errorf("expected Cache-Control: no-cache for /, got: %q", cache)
+	}
+}
+
 func TestServer_Healthz(t *testing.T) {
 	s := NewServer(Config{Addr: "127.0.0.1:0"})
 	ts := httptest.NewServer(s.routes())
@@ -48,7 +65,6 @@ func TestServer_StaticAssetsServed(t *testing.T) {
 	ts := httptest.NewServer(s.routes())
 	defer ts.Close()
 
-	// Pick a few representative assets.
 	for _, p := range []string{
 		"/static/wasm/wterm.wasm",
 		"/static/css/terminal.css",
@@ -69,15 +85,47 @@ func TestServer_StaticAssetsServed(t *testing.T) {
 	}
 }
 
+func TestServer_StaticCacheHeaders(t *testing.T) {
+	s := NewServer(Config{Addr: "127.0.0.1:0"})
+	ts := httptest.NewServer(s.routes())
+	defer ts.Close()
+
+	tests := []struct {
+		path   string
+		wantCC string
+	}{
+		{"/static/wasm/wterm.wasm", "public, max-age=3600"},
+		{"/static/css/terminal.css", "public, max-age=3600"},
+		{"/static/js/@wterm/dom/wterm.js", "public, max-age=3600"},
+		{"/static/js/@wterm/core/index.js", "public, max-age=3600"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.path, func(t *testing.T) {
+			resp, err := http.Get(ts.URL + tt.path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer resp.Body.Close()
+
+			if resp.StatusCode != 200 {
+				t.Fatalf("status = %d", resp.StatusCode)
+			}
+
+			got := resp.Header.Get("Cache-Control")
+			if got != tt.wantCC {
+				t.Errorf("Cache-Control = %q, want %q", got, tt.wantCC)
+			}
+		})
+	}
+}
+
 func TestParseControlMessage(t *testing.T) {
-	// sanity: handleControlMessage should not write to PTY.
 	sess := &ptySession{}
 	handled, err := sess.handleControlMessage([]byte(`{"type":"resize","cols":80,"rows":24}`))
 	if !handled {
 		t.Error("expected handled=true for resize")
 	}
-	// We can't actually call Setsize in a unit test (no PTY), but
-	// the call path should be exercised. The error returned is fine.
 	_ = err
 
 	handled, err = sess.handleControlMessage([]byte(`not json`))

@@ -127,7 +127,7 @@ func (s *Server) routes() http.Handler {
 		// rather than serving a broken UI silently.
 		panic(fmt.Errorf("embed sub: %w", err))
 	}
-	mux.Handle("/static/", http.StripPrefix("/static/", http.FileServer(http.FS(staticSub))))
+	mux.Handle("/static/", staticCacheHandler(staticSub))
 	mux.HandleFunc("/", s.handleIndex)
 	mux.HandleFunc("/ws", s.handleWS)
 	mux.HandleFunc("/api/chat/ws", s.handleChatWS)
@@ -148,6 +148,7 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
+	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	_, _ = w.Write(data)
 }
@@ -339,4 +340,17 @@ func newSessionID() string {
 		return fmt.Sprintf("sess_%d", time.Now().UnixNano())
 	}
 	return "sess_" + hex.EncodeToString(b)
+}
+
+// staticCacheHandler serves files from the embedded filesystem fsys
+// under the /static/ prefix. It sets Cache-Control: public, max-age=3600
+// for all static assets (JS, CSS, WASM, etc.) since they are served
+// from content-hashed subdirectories like @wterm/.
+func staticCacheHandler(fsys fs.FS) http.Handler {
+	fileServer := http.FileServer(http.FS(fsys))
+	return http.StripPrefix("/static/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Set long-lived cache for all static assets.
+		w.Header().Set("Cache-Control", "public, max-age=3600")
+		fileServer.ServeHTTP(w, r)
+	}))
 }

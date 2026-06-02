@@ -128,7 +128,7 @@ same `ConversationLoop` — only the wire format differs.
   bucket for the chat WS endpoint (e.g. 5 new sessions per minute,
   60 messages per minute). Use `golang.org/x/time/rate` (add the
   dep). Configurable via `CLAW_WEB_RATE_RPM`.
-- [ ] **Static asset caching**: serve `/static/*` with
+- [x] **Static asset caching**: serve `/static/*` with
   `Cache-Control: public, max-age=3600` for hashed assets, `no-cache`
   for `index.html`. Add content-hashed subdirs for JS/CSS if not
   already present.
