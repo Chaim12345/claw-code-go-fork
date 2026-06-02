@@ -564,8 +564,15 @@ func RunRalphLoop(ctx context.Context, loop *ConversationLoop, cfg RalphConfig) 
 		// Reset the provider session so each iteration gets a
 		// fresh context. The spec file is the only persistent
 		// memory.
-		if resetter, ok := loop.Client.(interface{ ResetSession() error }); ok {
-			_ = resetter.ResetSession()
+		//
+		// Use the declared api.SessionResetter interface (no
+		// return value) — the previous inline assertion
+		// `interface{ ResetSession() error }` didn't match
+		// the actual provider signature, so session reset was
+		// a silent no-op and message history accumulated across
+		// iters until the prompt exceeded the model's cap.
+		if resetter, ok := loop.Client.(api.SessionResetter); ok {
+			resetter.ResetSession()
 		}
 		return RalphOneIteration(ctx, loop, *cfgPtr, i, max)
 	}

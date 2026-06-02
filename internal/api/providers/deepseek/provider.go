@@ -172,14 +172,34 @@ func debugLog(format string, args ...interface{}) {
 	}
 }
 
-// resetSession clears the session state, forcing a new session on next request
-func (c *Client) resetSession() {
+// ResetSession clears the session state, forcing a new session on
+// next request. It also resets the underlying WebClient's session
+// fields so the next ChatCompletionStream call starts with no
+// parent-message chain — critical for Ralph loops that need each
+// fresh-context iteration to be truly isolated from previous
+// iter's server-side history.
+//
+// This implements api.SessionResetter (declared with no return
+// value) so callers can type-assert via that interface.
+func (c *Client) ResetSession() {
 	c.mu.Lock()
-	defer c.mu.Unlock()
 	c.chatSessionID = ""
 	c.parentMessageID = ""
+	// Also reset the WebClient's chain — without this the next
+	// stream call still sends the old parentMsgID, so the server
+	// keeps appending to the same conversation. We need to drop
+	// the chain on the client side too.
+	if c.web != nil {
+		c.web.chatSession = ""
+		c.web.parentMsgID = nil
+	}
+	c.mu.Unlock()
 	debugLog("Session reset - will create new session on next request")
 }
+
+// resetSession is kept as an unexported alias for internal callers
+// that don't have an interface assertion handy.
+func (c *Client) resetSession() { c.ResetSession() }
 
 // isSessionError checks if an error indicates session expiry/invalidity
 func isSessionError(errMsg string) bool {
