@@ -93,3 +93,19 @@ func TestRalphSpecIsComplete(t *testing.T) {
 		}
 	}
 }
+
+func TestRalphIteration_DetectsSentinel(t *testing.T) {
+	cfg := DefaultRalphConfig()
+	verdict := RalphVerdict("All done.\nRALPH_DONE\n", "- [x] one\n- [x] two\n", cfg)
+	if verdict != RalphVerdictDone {
+		t.Errorf("got %v, want %v", verdict, RalphVerdictDone)
+	}
+	verdict = RalphVerdict("I am still working on item three.", "- [x] one\n- [ ] three\n", cfg)
+	if verdict != RalphVerdictContinue {
+		t.Errorf("got %v, want %v", verdict, RalphVerdictContinue)
+	}
+	verdict = RalphVerdict("Spec looks empty to me.", "", cfg)
+	if verdict != RalphVerdictDone {
+		t.Errorf("got %v, want %v", verdict, RalphVerdictDone)
+	}
+}

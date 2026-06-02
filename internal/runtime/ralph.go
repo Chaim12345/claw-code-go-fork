@@ -2,11 +2,14 @@ package runtime
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"os"
 	"regexp"
 	"strings"
 	"text/template"
+
+	"claw-code-go/internal/api"
 )
 
 // RalphConfig configures a single Ralph loop run.
@@ -125,6 +128,98 @@ var openTaskPattern = regexp.MustCompile(`(?m)^\s*(?:-|\*|\d+\.)\s+\[(?:\s|todo|
 // present in the spec body. Empty or all-checked specs return true.
 func RalphSpecIsComplete(spec string) bool {
 	return !openTaskPattern.MatchString(spec)
+}
+
+// RalphVerdictKind is the outcome of a single iteration.
+//
+// (Originally named `RalphVerdict` in the plan; renamed to avoid
+// the type/function name collision with the RalphVerdict()
+// decision function below.)
+type RalphVerdictKind int
+
+const (
+	// RalphVerdictContinue means the spec still has open work
+	// and the model did not emit the sentinel.
+	RalphVerdictContinue RalphVerdictKind = iota
+	// RalphVerdictDone means either the model emitted the
+	// sentinel, or every line in the spec looks done.
+	RalphVerdictDone
+	// RalphVerdictBlocked means the model said it was blocked
+	// (e.g. output matched a "Blockers" header in its response
+	// text). The loop should record this and stop gracefully.
+	RalphVerdictBlocked
+)
+
+// RalphVerdict decides what to do next based on the final
+// assistant text and the current spec body.
+//
+// Priority:
+//  1. Sentinel on its own line → Done
+//  2. Spec is fully checked off (or empty) → Done
+//  3. Otherwise → Continue
+func RalphVerdict(finalText, specBody string, cfg RalphConfig) RalphVerdictKind {
+	if RalphDetectedSentinel(finalText, cfg.DoneSentinel) {
+		return RalphVerdictDone
+	}
+	if RalphSpecIsComplete(specBody) {
+		return RalphVerdictDone
+	}
+	return RalphVerdictContinue
+}
+
+// RalphOneIteration runs ONE fresh-context agent turn. It:
+//  1. Reads the spec from disk.
+//  2. Renders the prompt with the current spec body.
+//  3. Calls loop.SendMessage(ctx, rendered).
+//  4. Re-reads the spec (the model may have edited it).
+//  5. Returns (verdict, finalText, error).
+//
+// The loop's conversation history grows across iterations
+// (because we use the same loop), which is intentional — it
+// keeps the model oriented. To get true fresh-context behavior,
+// call ResetSession() on the client before each iteration (see
+// RunRalphLoop for the wiring).
+func RalphOneIteration(ctx context.Context, loop *ConversationLoop, cfg RalphConfig, iteration, maxIter int) (RalphVerdictKind, string, error) {
+	specBody, err := readRalphSpec(cfg.SpecPath)
+	if err != nil {
+		return RalphVerdictContinue, "", fmt.Errorf("read spec: %w", err)
+	}
+	prompt, err := RenderRalphPrompt(cfg, specBody, iteration, maxIter)
+	if err != nil {
+		return RalphVerdictContinue, "", err
+	}
+	if err := loop.SendMessage(ctx, prompt); err != nil {
+		return RalphVerdictContinue, "", fmt.Errorf("send: %w", err)
+	}
+	// SendMessage populates loop.Session.Messages with the new
+	// turn. The final assistant text is the last assistant
+	// message's text content.
+	finalText := lastAssistantText(loop.Session.Messages)
+	// Re-read the spec in case the model edited it.
+	updated, err := readRalphSpec(cfg.SpecPath)
+	if err != nil {
+		// Spec disappeared? Treat as done (we'll exit on next check).
+		updated = specBody
+	}
+	return RalphVerdict(finalText, updated, cfg), finalText, nil
+}
+
+// lastAssistantText extracts the final text from the most recent
+// assistant message in the session, or "" if none.
+func lastAssistantText(messages []api.Message) string {
+	for i := len(messages) - 1; i >= 0; i-- {
+		if messages[i].Role != "assistant" {
+			continue
+		}
+		var sb strings.Builder
+		for _, cb := range messages[i].Content {
+			if cb.Type == "text" {
+				sb.WriteString(cb.Text)
+			}
+		}
+		return sb.String()
+	}
+	return ""
 }
 
 // RenderRalphPrompt executes the prompt template with the spec
