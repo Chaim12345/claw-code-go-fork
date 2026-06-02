@@ -14,27 +14,39 @@ import (
 	"strings"
 )
 
-const systemPromptBase = `You are Claude Code, an AI assistant for software engineering tasks. You have access to tools for running bash commands, reading and writing files, searching with glob patterns, and grepping for patterns in code. Use these tools to help users with coding tasks.
+const systemPromptBase = `You are Claude Code, an AI assistant for software engineering tasks. You have access to tools for running bash commands, reading and writing files, searching with glob patterns, and grepping for patterns in code. You also have access to web search and web fetch for retrieving real-time information from the internet. Use these tools to help users with coding tasks.
 
-IMPORTANT: When using tools, prefer XML format over JSON for better streaming compatibility:
-<tool_name>
-<parameter_name>value</parameter_name>
-</tool_name>
+CRITICAL: When you need to call a tool, you MUST use this EXACT XML format:
+<tool_calls>
+<invoke name="TOOL_NAME">
+<parameter name="ARG_NAME">ARG_VALUE</parameter>
+</invoke>
+</tool_calls>
 
-JSON format is supported as a fallback but XML is preferred.`
+Example - to run a command: <tool_calls><invoke name="bash"><parameter name="command">ls -la</parameter></invoke></tool_calls>
+
+Do NOT put file paths or text inside <tool_calls> tags. Only use <invoke> tags with <parameter> children.`
+
+// toolBlock is a per-tool accumulator populated from streaming events.
+// Defined at package scope so it can be passed to parallel helper files.
+type toolBlock struct {
+	id          string
+	name        string
+	inputBuffer string
+}
 
 // ConversationLoop manages the agentic conversation loop with tool use.
 type ConversationLoop struct {
-	Client          api.APIClient // provider-agnostic client interface
-	Session         *Session
-	Tools           []api.Tool
-	Permissions     *Permissions
-	PermManager     *permissions.Manager  // Phase 5 permission manager (may be nil)
-	Config          *Config
-	MCPRegistry     *mcp.Registry         // MCP server registry (may be nil)
-	Compaction      CompactionState        // Phase 6 token tracking and compaction state
-	CtxAssembler    *clawctx.Assembler    // Phase 12 context assembler (may be nil)
-	Usage           *usage.Tracker        // Phase 13 per-session token usage tracker
+	Client       api.APIClient // provider-agnostic client interface
+	Session      *Session
+	Tools        []api.Tool
+	Permissions  *Permissions
+	PermManager  *permissions.Manager // Phase 5 permission manager (may be nil)
+	Config       *Config
+	MCPRegistry  *mcp.Registry      // MCP server registry (may be nil)
+	Compaction   CompactionState    // Phase 6 token tracking and compaction state
+	CtxAssembler *clawctx.Assembler // Phase 12 context assembler (may be nil)
+	Usage        *usage.Tracker     // Phase 13 per-session token usage tracker
 
 	// lastStopReason is the stop_reason reported by the most recent
 	// streaming turn ("end_turn", "tool_use", "max_tokens", …). Set
@@ -131,18 +143,18 @@ func (loop *ConversationLoop) SendMessage(ctx context.Context, userText string) 
 			{Type: "text", Text: userText},
 		},
 	}
-	
+
 	// Truncate if message exceeds size limits
 	userMsg, wasTruncated := ValidateAndTruncateMessage(userMsg)
 	if wasTruncated {
 		fmt.Fprintf(os.Stderr, "[message-limit] user message truncated to fit provider limits\n")
 	}
-	
+
 	// Append validated message
 	loop.Session.Messages = append(loop.Session.Messages, userMsg)
 
 	// Compact history if approaching the token budget (Phase 6).
-	if ShouldCompact(loop.Compaction.LastInputTokens, loop.Session.Messages, loop.Config) {
+	if ShouldCompact(loop.Compaction.LastInputTokens, loop.Session.Messages, loop.Config, loop.Client) {
 		summary, err := CompactSession(ctx, loop.Client, loop.Config, loop.Session)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "[compact] warning: %v\n", err)
@@ -227,12 +239,6 @@ func (loop *ConversationLoop) runOneTurn(ctx context.Context) (string, int, int,
 	}
 
 	// Accumulators for the current response
-	type toolBlock struct {
-		id          string
-		name        string
-		inputBuffer string
-	}
-
 	var (
 		textBlocks          []api.ContentBlock
 		toolBlocks          []toolBlock
@@ -244,7 +250,6 @@ func (loop *ConversationLoop) runOneTurn(ctx context.Context) (string, int, int,
 		outputTokens        int
 		streamedOutputChars int // total bytes the provider emitted across text deltas + tool argument deltas; used for the outputTokens fallback
 	)
-
 
 	for event := range ch {
 		switch event.Type {
@@ -417,7 +422,7 @@ func (loop *ConversationLoop) SendMessageStreaming(ctx context.Context, userText
 			{Type: "text", Text: userText},
 		},
 	}
-	
+
 	// Truncate if message exceeds size limits
 	userMsg, wasTruncated := ValidateAndTruncateMessage(userMsg)
 	if wasTruncated {
@@ -426,12 +431,12 @@ func (loop *ConversationLoop) SendMessageStreaming(ctx context.Context, userText
 			Text: "Your message was truncated to fit provider size limits. The full content is preserved in the conversation history.",
 		}
 	}
-	
+
 	// Append validated message
 	loop.Session.Messages = append(loop.Session.Messages, userMsg)
 
 	// Compact history if approaching the token budget (Phase 6).
-	if ShouldCompact(loop.Compaction.LastInputTokens, loop.Session.Messages, loop.Config) {
+	if ShouldCompact(loop.Compaction.LastInputTokens, loop.Session.Messages, loop.Config, loop.Client) {
 		summary, err := CompactSession(ctx, loop.Client, loop.Config, loop.Session)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "[compact] warning: %v\n", err)
@@ -513,12 +518,7 @@ func (loop *ConversationLoop) runOneTurnStreaming(ctx context.Context, events ch
 		return "", 0, 0, fmt.Errorf("stream response: %w", err)
 	}
 
-	type toolBlock struct {
-		id          string
-		name        string
-		inputBuffer string
-	}
-
+	// Accumulators for the current response
 	var (
 		textBlocks          []api.ContentBlock
 		toolBlocks          []toolBlock
@@ -665,9 +665,9 @@ func (loop *ConversationLoop) runOneTurnStreaming(ctx context.Context, events ch
 				// Plan mode: describe without executing.
 				if loop.PermManager.Mode == permissions.ModePlan {
 					planResult := api.ContentBlock{
-						Type:    "tool_result",
+						Type:      "tool_result",
 						ToolUseID: tb.id,
-						Content: []api.ContentBlock{{Type: "text", Text: fmt.Sprintf("[Plan: %s %s]", tb.name, summary)}},
+						Content:   []api.ContentBlock{{Type: "text", Text: fmt.Sprintf("[Plan: %s %s]", tb.name, summary)}},
 					}
 					toolResults = append(toolResults, planResult)
 					continue
@@ -676,10 +676,10 @@ func (loop *ConversationLoop) runOneTurnStreaming(ctx context.Context, events ch
 				switch decision {
 				case permissions.DecisionDeny:
 					denied := api.ContentBlock{
-						Type:    "tool_result",
+						Type:      "tool_result",
 						ToolUseID: tb.id,
-						Content: []api.ContentBlock{{Type: "text", Text: fmt.Sprintf("Permission denied for tool: %s", tb.name)}},
-						IsError: true,
+						Content:   []api.ContentBlock{{Type: "text", Text: fmt.Sprintf("Permission denied for tool: %s", tb.name)}},
+						IsError:   true,
 					}
 					toolResults = append(toolResults, denied)
 					continue
@@ -707,10 +707,10 @@ func (loop *ConversationLoop) runOneTurnStreaming(ctx context.Context, events ch
 					switch userDecision {
 					case PermDecisionDeny:
 						denied := api.ContentBlock{
-							Type:    "tool_result",
+							Type:      "tool_result",
 							ToolUseID: tb.id,
-							Content: []api.ContentBlock{{Type: "text", Text: fmt.Sprintf("Permission denied for tool: %s", tb.name)}},
-							IsError: true,
+							Content:   []api.ContentBlock{{Type: "text", Text: fmt.Sprintf("Permission denied for tool: %s", tb.name)}},
+							IsError:   true,
 						}
 						toolResults = append(toolResults, denied)
 						continue

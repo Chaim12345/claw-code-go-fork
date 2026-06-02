@@ -30,12 +30,30 @@ type CompactionState struct {
 }
 
 // EstimateTokens roughly estimates the number of tokens in a slice of messages
-// using a simple chars-per-token heuristic.
+// using a simple chars-per-token heuristic. It accounts for text blocks,
+// nested content blocks (tool results), and tool_use input maps.
 func EstimateTokens(messages []api.Message) int {
 	var total int
 	for _, msg := range messages {
 		for _, cb := range msg.Content {
-			total += len(cb.Text) / charsPerToken
+			switch cb.Type {
+			case "text":
+				total += len(cb.Text) / charsPerToken
+			case "tool_use":
+				// Tool use blocks carry their input as a map; estimate
+				// from the serialised form. The provider sends this as
+				// input_json_delta so counting chars/4 is consistent with
+				// how we estimate streamed output.
+				if cb.Input != nil {
+					for k, v := range cb.Input {
+						total += len(k) / charsPerToken
+						if s, ok := v.(string); ok {
+							total += len(s) / charsPerToken
+						}
+					}
+				}
+			}
+			// Nested content blocks (tool_result inner blocks)
 			for _, inner := range cb.Content {
 				total += len(inner.Text) / charsPerToken
 			}
@@ -48,20 +66,54 @@ func EstimateTokens(messages []api.Message) int {
 // It uses the actual API-reported input token count when available (> 0),
 // falling back to EstimateTokens.
 //
-// The threshold is computed against cfg.CompactionMaxInputTokens when set,
-// otherwise against cfg.MaxTokens. Providers with very large context
-// windows (e.g. DeepSeek's web API caps at 655k tokens for Instant) MUST
-// populate CompactionMaxInputTokens so we don't compact based on the
-// per-turn MaxTokens budget, which is meant for output budgeting not
-// context.
-func ShouldCompact(inputTokens int, messages []api.Message, cfg *Config) bool {
+// In delta mode (DeepSeek), the API-reported input token count reflects
+// only the delta prompt size (system + tools + last message), which is
+// typically 2-3K tokens — far below the real threshold. In that case we
+// always fall back to EstimateTokens on the full message list so we
+// don't silently ignore server-side context growth.
+//
+// The threshold is computed against the client's MaxInputTokens() when the
+// client supports it (non-zero), then cfg.CompactionMaxInputTokens, then
+// cfg.MaxTokens as a last resort. Providers with very large context windows
+// (e.g. DeepSeek's web API) advertise their real limit via the client
+// interface so we don't compact based on the per-turn output budget.
+func ShouldCompact(inputTokens int, messages []api.Message, cfg *Config, client api.APIClient) bool {
 	if !cfg.CompactionEnabled {
 		return false
 	}
 	if inputTokens <= 0 {
 		inputTokens = EstimateTokens(messages)
 	}
-	basis := cfg.CompactionMaxInputTokens
+	// In delta mode the API-reported input token count reflects only
+	// the delta prompt (system + tools + last message), typically
+	// 2-3K tokens. The server tracks the full conversation, so we
+	// must estimate from the complete message list. Without this
+	// guard, compaction never triggers and the server-side context
+	// silently overflows.
+	//
+	// Detection: if delta mode is explicitly enabled, always use the
+	// message-list estimate. As a secondary heuristic for providers
+	// that may run delta-like without the explicit flag, fall back
+	// to comparing the reported input against the full estimate —
+	// a >5x ratio is almost certainly a delta/non-delta mismatch.
+	if cfg.DeltaMode {
+		inputTokens = EstimateTokens(messages)
+	} else {
+		estimatedFromMessages := EstimateTokens(messages)
+		if estimatedFromMessages > inputTokens*5 {
+			// The full message list is >5x larger than the reported
+			// input — almost certainly delta mode. Use the estimate.
+			inputTokens = estimatedFromMessages
+		}
+	}
+	// Prefer the client's own limit (single source of truth for the model).
+	basis := 0
+	if client != nil {
+		basis = client.MaxInputTokens()
+	}
+	if basis <= 0 {
+		basis = cfg.CompactionMaxInputTokens
+	}
 	if basis <= 0 {
 		basis = cfg.MaxTokens
 	}
@@ -114,7 +166,7 @@ func buildTranscript(messages []api.Message) string {
 				for _, inner := range cb.Content {
 					if len(inner.Text) > 300 {
 						fmt.Fprintf(&sb, "[Tool result: %s... (truncated)]\n", inner.Text[:300])
-					} else {
+					} else if inner.Text != "" {
 						fmt.Fprintf(&sb, "[Tool result: %s]\n", inner.Text)
 					}
 				}
@@ -195,5 +247,18 @@ func GetContinuationMessage(summary string) api.Message {
 		Content: []api.ContentBlock{
 			{Type: "text", Text: text},
 		},
+	}
+}
+
+// resetProviderSessionAfterCompaction calls ResetSession on the provider
+// client if it implements the SessionResetter interface. This is critical
+// for delta mode: after compaction trims the client-side message list, the
+// DeepSeek server still holds the full pre-compaction conversation via
+// parent_message_id chaining. Without this reset, the server-side context
+// silently overflows the model's context window even though the client
+// thinks it has been compacted.
+func resetProviderSessionAfterCompaction(client api.APIClient) {
+	if r, ok := client.(api.SessionResetter); ok {
+		r.ResetSession()
 	}
 }
