@@ -272,6 +272,7 @@ func runRalphSubcommand(args []string) {
 	fs := flag.NewFlagSet("ralph", flag.ExitOnError)
 	spec := fs.String("spec", runtime.DefaultRalphSpecPath, "Path to the spec/roadmap file")
 	maxIter := fs.Int("max-iterations", runtime.DefaultRalphMaxIterations, "Maximum fresh-context iterations")
+	selfDebug := fs.Bool("self-debug", true, "After exhausting retries, run one self-debug pass where the agent sees the last error and is tasked with fixing the root cause")
 	_ = fs.Parse(args)
 
 	cfg := runtime.LoadConfig()
@@ -292,8 +293,9 @@ func runRalphSubcommand(args []string) {
 	ralphCfg := runtime.DefaultRalphConfig()
 	ralphCfg.SpecPath = *spec
 	ralphCfg.MaxIterations = *maxIter
+	ralphCfg.SelfDebug = *selfDebug
 
-	fmt.Fprintf(os.Stderr, "[ralph] starting against %s (max %d iterations)\n", ralphCfg.SpecPath, ralphCfg.MaxIterations)
+	fmt.Fprintf(os.Stderr, "[ralph] starting against %s (max %d iterations, self-debug=%v)\n", ralphCfg.SpecPath, ralphCfg.MaxIterations, ralphCfg.SelfDebug)
 	if err := runtime.RunRalphLoop(ctx, loop, ralphCfg); err != nil {
 		fmt.Fprintf(os.Stderr, "[ralph] stopped: %v\n", err)
 		os.Exit(1)

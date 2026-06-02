@@ -122,7 +122,7 @@ func TestRalphLoop_StopsOnVerdict(t *testing.T) {
 	}
 	cfg := DefaultRalphConfig()
 	cfg.MaxIterations = 10
-	err := RunRalphLoopWithIter(context.Background(), cfg, iterFn)
+	err := RunRalphLoopWithIter(context.Background(), &cfg, iterFn)
 	if err != nil {
 		t.Fatalf("RunRalphLoopWithIter: %v", err)
 	}
@@ -139,7 +139,7 @@ func TestRalphLoop_StopsAtMax(t *testing.T) {
 	}
 	cfg := DefaultRalphConfig()
 	cfg.MaxIterations = 5
-	err := RunRalphLoopWithIter(context.Background(), cfg, iterFn)
+	err := RunRalphLoopWithIter(context.Background(), &cfg, iterFn)
 	if err == nil {
 		t.Error("expected error on max iterations")
 	}

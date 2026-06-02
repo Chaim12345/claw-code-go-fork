@@ -107,9 +107,7 @@ The spec content is shown below for convenience — it is the live file, so re-r
 
 Your previous iteration failed with this error:
 
-```
-{{.LastError}}
-```
+    {{.LastError}}
 
 You are the developer. You are the debugger. Treat this as a real
 bug report about your own work — or about the environment you run in.
@@ -122,7 +120,7 @@ Concrete steps:
      the failing command yourself).
   2. Identify the smallest fix:
      - Missing tool / binary on PATH → install it, add it to PATH,
-       or symlink it (e.g. `ln -s /usr/local/go/bin/go /usr/local/bin/go`).
+       or symlink it (example: ln -s /usr/local/go/bin/go /usr/local/bin/go).
      - Missing env var → export it before re-running, or document it
        in a script.
      - Wrong API / signature mismatch → read the actual definition
@@ -132,7 +130,7 @@ Concrete steps:
        the loop retried, the issue is upstream; do not loop on it.
   3. Apply the fix.
   4. Verify the fix actually works (run the previously-failing
-     command, run `go test ./...`, etc.).
+     command, run go test ./..., etc.).
   5. Commit the fix as a separate atomic commit.
   6. Resume work on the spec: pick the next open item, implement,
      test, commit, mark done.
@@ -571,7 +569,7 @@ func RunRalphLoop(ctx context.Context, loop *ConversationLoop, cfg RalphConfig) 
 		}
 		return RalphOneIteration(ctx, loop, *cfgPtr, i, max)
 	}
-	return RunRalphLoopWithIter(ctx, cfg, iter)
+	return RunRalphLoopWithIter(ctx, cfgPtr, iter)
 }
 
 // RenderRalphPrompt executes the prompt template with the spec
