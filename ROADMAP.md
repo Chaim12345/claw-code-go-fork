@@ -132,7 +132,7 @@ same `ConversationLoop` — only the wire format differs.
   `Cache-Control: public, max-age=3600` for hashed assets, `no-cache`
   for `index.html`. Add content-hashed subdirs for JS/CSS if not
   already present.
-- [ ] **TLS termination guide**: new `docs/web-deployment.md` with
+- [x] **TLS termination guide**: new `docs/web-deployment.md` with
   copy-paste configs for Caddy and nginx (TLS, reverse proxy, large
   response buffering for SSE, websocket upgrade headers).
 
