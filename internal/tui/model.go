@@ -246,6 +246,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
+		m.logResize(msg.Width, msg.Height)
 		if !m.ready {
 			m.ready = true
 			m = m.initViewport()
@@ -314,6 +315,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			card.hasDiff = true
 		}
 		m.toolCards = append(m.toolCards, card)
+		
+		// Update tool call manager status to running
+		m.toolCallManager.UpdateStatus(card.id, ToolCallRunning, "", "")
+		
 		m.streamBuf += formatToolCard(card) + "\n"
 		// If the agent updated the todo list, refresh the panel.
 		if msg.name == "todo_write" {
@@ -323,6 +328,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, waitForStream(m.streamChan)
 
 	case streamToolDoneMsg:
+		// Log tool completion
+		if m.debugEnabled {
+			debug.Log(debug.EventToolComplete, fmt.Sprintf("Tool completed: %s", msg.name), map[string]interface{}{
+				"tool_name": msg.name,
+				"result":    msg.result,
+			})
+		}
+		
 		// Update the most recent matching card with the result. If the
 		// tool wrote/edited a file, attempt to compute an inline diff
 		// for the card so the user can see the change visually.
@@ -332,6 +345,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if m.toolCards[i].hasDiff {
 					m.toolCards[i].diffInline = m.computeToolDiff(m.toolCards[i])
 				}
+				
+				// Update tool call manager status to success
+				m.toolCallManager.UpdateStatus(m.toolCards[i].id, ToolCallSuccess, msg.result, "")
 				break
 			}
 		}
@@ -353,12 +369,18 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			})
 		}
 		
-		// Commit streamBuf to viewBuf with token annotation. The text
-		// portions of the buffer get routed through glamour for
-		// markdown rendering; tool card lines are passed through as-is
-		// because they're already styled.
+		// Commit streamBuf to viewBuf with token annotation
+		// Use the streaming renderer's final output instead of renderBufferSegments
 		if m.streamBuf != "" || m.hasStreamContent {
-			rendered := renderBufferSegments(m.streamBuf)
+			// Get final rendered content from streaming renderer
+			rendered := m.streamingRenderer.Render()
+			
+			// Add tool cards if any
+			toolCardsRendered := m.toolCallManager.RenderActiveCalls()
+			if toolCardsRendered != "" {
+				rendered += "\n" + toolCardsRendered
+			}
+			
 			tokLine := statusStyle.Render(fmt.Sprintf(
 				"\n\nTokens: %s in / %s out\n\n",
 				formatNum(m.inputTokens),
@@ -405,10 +427,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case streamErrMsg:
+		m.logError("stream", msg.err)
 		m.viewBuf += errorStyle.Render(fmt.Sprintf("Error: %v\n\n", msg.err))
 		m.streamBuf = ""
 		m.hasStreamContent = false
-		m.state = stateInput
+		m.setState(stateInput, "stream error")
 		m = m.refreshViewport()
 		return m, nil
 
