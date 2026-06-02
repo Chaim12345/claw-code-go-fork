@@ -52,7 +52,7 @@ mode.
   pages and any public design blogs. Note: safe-area insets, virtual
   keyboard handling, sticky input bar, message virtualization for long
   threads. Add bullets to `WEB_RESEARCH.md`.
-- [ ] **Research PWA + offline for chat apps**: `web_fetch` the MDN PWA
+- [x] **Research PWA + offline for chat apps**: `web_fetch` the MDN PWA
   guide and any "installable chat app" tutorials. Add bullets to
   `WEB_RESEARCH.md`.
 - [ ] **Rewrite this ROADMAP.md based on research findings.** Add new

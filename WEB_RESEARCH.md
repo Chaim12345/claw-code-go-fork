@@ -121,15 +121,43 @@ Sources: OpenAI ChatGPT web updates (Nov 2024), Claude.ai design docs, Perplexit
 
 ## 8. PWA + Offline for Chat Apps
 
-Sources: MDN PWA guides, web.dev caching articles, community patterns
+Sources: MDN PWA guides (Making PWAs installable), Google PWA codelabs, community chat PWA implementations, caching strategy articles
 
-- **Cache-first for static assets**: App shell (HTML, CSS, JS, icons) should be pre-cached during SW `install`. Served from cache instantly; updated in background via SW version bumps.
-- **Network-first for API endpoints**: Chat messages and API data should attempt network first, fall back to cache or show "offline" state. Caching dynamic chat data is complex and not recommended for real-time apps.
-- **WebSocket is inherently network-dependent**: When offline, WS connections fail. The reconnection logic with exponential backoff (1s → 2s → 4s → max 30s) is the standard approach. Show a "Reconnecting..." pill.
+### MDN: Making PWAs Installable
+- **Installability requires**: HTTPS, a web app manifest with `name`/`icons`/`start_url`/`display`, and a registered service worker with a fetch handler. All three must be present for the browser to offer install.
+- **`display: standalone`**: Opens without browser chrome, critical for app-like feel. Alternatives: `fullscreen`, `minimal-ui`, `browser`.
+- **Manifest `start_url`**: Should be `"/"` (root-relative). Must be same-origin. This is the URL launched when the user opens the installed PWA.
+- **Icon requirements**: Chrome requires at least 192x192 and 512x512 PNG icons. iOS requires a 180x180 apple-touch-icon for the home screen.
+- **iOS Safari special handling**: Safari does NOT use the Web App Manifest for icons. Must include `<link rel="apple-touch-icon" href="...">` and `<meta name="apple-mobile-web-app-capable" content="yes">` separately.
+
+### Service Worker Lifecycle & Caching (from Google codelabs)
+- **Registration**: `navigator.serviceWorker.register('/sw.js')` in the main JS. The SW file must be served from the root (or a parent path) to control the full scope.
+- **Install event**: Pre-cache critical assets (HTML, CSS, JS, icons). Use `cache.addAll([...])` inside `event.waitUntil()`.
+- **Activate event**: Clean up old cache versions. `caches.keys().then(keys => keys.filter(k => k !== CURRENT_CACHE).forEach(k => caches.delete(k)))`.
+- **Fetch event**: Intercept all network requests. Apply strategy based on URL pattern.
+- **SW update flow**: When SW file changes, the new SW installs in background but waits for all tabs to close before activating (unless `skipWaiting()` is called).
+
+### Caching Strategies for Chat Apps
+- **Cache-first for static assets**: App shell (HTML, CSS, JS, icons, fonts) should be pre-cached during SW `install`. Served from cache instantly; updated in background via SW version bumps. Best for hashed assets that don't change.
+- **Network-first for API endpoints**: Chat messages and session data should attempt network first, fall back to cache or show "offline" state. Caching dynamic chat content is complex and not recommended for real-time apps.
+- **Stale-while-revalidate for semi-static content**: Serve from cache, fetch update in background. Good for command lists, configuration, user preferences.
+- **No caching for WebSocket connections**: WS is inherently network-dependent. The SW cannot intercept or cache WebSocket traffic.
+
+### Offline Chat App Patterns (from community implementations)
+- **IndexedDB for offline message queue**: Chat apps (e.g., ChattApp-PWA) store outgoing messages in IndexedDB when offline, sync when reconnected. Incoming messages are ephemeral — not cached, just displayed live.
+- **CRDT-based sync**: Advanced pattern (HowProgrammingWorks/PWA) uses Conflict-free Replicated Data Types over a shared WebSocket for automatic reconnection and lost message retrieval. Overkill for single-session chat but relevant for multi-device sync.
+- **WebSocket reconnection**: Exponential backoff with jitter (1s → 2s → 4s → max 30s) to prevent thundering herd on reconnect. Re-send last `user_input` only if server hasn't ack'd (per-message UUID tracking). Show "Reconnecting..." pill in header.
+- **Single WebSocket shared across tabs**: Use `BroadcastChannel` API or `localStorage` events to coordinate a single WS connection across multiple tabs of the same PWA.
+
+### Offline Fallback & Resilience
 - **Offline fallback page**: A static HTML page cached during SW `install` that says "You're offline — reconnect to continue" with a retry button that reloads the app.
 - **Cache versioning**: Use a cache name with version string (e.g., `claw-chat-v1`). On new SW `activate`, delete old caches to prevent stale assets.
-- **Workbox** (Google's SW library) simplifies this with `precacheAndRoute`, `registerRoute`, and strategy plugins — but we'll implement vanilla since the spec says no framework.
-- **iOS PWA limitations**: No push notifications in iOS Safari PWAs (as of 2024). No background sync. Service worker cache is evicted more aggressively on iOS. Worth documenting as known limitations.
+- **Network status detection**: Use `navigator.onLine` + `online`/`offline` events to update UI state. Not reliable alone (false positives) — always gate on actual fetch/WS failure.
+
+### Platform Limitations
+- **iOS PWA limitations**: No push notifications in iOS Safari PWAs (as of 2024). No background sync. Service worker cache is evicted more aggressively on iOS (capped at ~50MB). No `beforeinstallprompt` event — must use custom "Add to Home Screen" instruction banner.
+- **Android/Chrome**: Full PWA support with WebAPK generation (appears in app drawer). `beforeinstallprompt` available for custom install UI. Background sync supported but limited to periodic sync (not real-time).
+- **Desktop PWAs**: Chrome 73+ shows install button in address bar. `beforeinstallprompt` works. Edge supports the same criteria as Chrome.
 
 ---
 
