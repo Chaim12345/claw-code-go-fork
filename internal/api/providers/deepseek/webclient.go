@@ -76,7 +76,10 @@ func IsRateLimitError(errMsg string) bool {
 	low := strings.ToLower(errMsg)
 	return strings.Contains(low, "too frequent") ||
 		strings.Contains(low, "rate_limit_reached") ||
-		strings.Contains(low, "rate limit")
+		strings.Contains(low, "rate limit") ||
+		strings.Contains(low, "server is busy") ||
+		strings.Contains(low, "quota") ||
+		strings.Contains(low, "429")
 }
 
 // LoadAuth resolves a DeepSeek auth token from one of:

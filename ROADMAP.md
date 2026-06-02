@@ -348,30 +348,25 @@ cover but the research showed are important.
 
 ## Blockers
 
-### Phase 1 item 2 (Implement `/api/chat/ws`) and item 3 (Go tests)
+### ~~Phase 1 item 2 (Implement `/api/chat/ws`) and item 3 (Go tests)~~ — RESOLVED 2026-06-02
 
-**Blocker**: The `ConversationLoop` type does not exist in the
-codebase. The spec says the chat WS handler must "Build a
-`ConversationLoop` using the same auth/provider/model resolution as
-the existing PTY path" and the `runChatSession` function signature
-requires a `*ConversationLoop`. The current `internal/web` package
-spawns a PTY + child process (`claw-code-go --repl`) — there is no
-in-process `ConversationLoop` abstraction available to wire up.
+The previous iteration incorrectly reported that `ConversationLoop`
+does not exist in the codebase. **It does** — see
+`internal/runtime/conversation.go:39`:
 
-**What's needed**: A `ConversationLoop` type (or equivalent) in
-`internal/runtime/` (or similar) that:
-- Resolves auth/provider/model from env/flags (same as the PTY path)
-- Runs a conversation turn-by-turn
-- Exposes `SendMessage`, `PermReply`, and a `TurnEvent` channel
-- Is importable by `internal/web`
+- `type ConversationLoop struct { ... }` (line 39)
+- `func NewConversationLoop(cfg *Config, client api.APIClient) *ConversationLoop` (line 60)
+- `func (loop *ConversationLoop) SendMessage(ctx, userText) error` (line 138)
+- `func (loop *ConversationLoop) SendMessageStreaming(ctx, userText, events) error` (line 417)
+- `type TurnEvent` channel is used in `runOneTurnStreaming` (line 506)
 
-**What was completed despite the blocker**:
-- `internal/web/chatproto/protocol.go` defines the full wire format
-  (`ClientInbound`, `ServerOutbound`, and all message type constants)
-- The existing `server.go` has a WS upgrade pattern ready to adapt
+All Phase 1 requirements (auth/provider/model resolution,
+`SendMessage`, `TurnEvent` channel, importable from `internal/web`)
+are already met by the existing type. The next iteration should
+proceed directly to wiring `internal/web/chatproto` to
+`*ConversationLoop` — **do not** waste cycles "implementing"
+`ConversationLoop` again.
 
-**Next iteration should**: Either implement `ConversationLoop` in a
-new package, or add the chat WS handler using the existing PTY-spawn
-approach with a JSON protocol wrapper. The `runChatSession` function
-signature should remain testable with a `json.Encoder`/`Decoder`
-pair.
+If you can't find it: `grep -rn "type ConversationLoop" internal/`
+returns exactly one match at `internal/runtime/conversation.go:39`.
+

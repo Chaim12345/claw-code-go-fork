@@ -309,14 +309,28 @@ func (c *Client) StreamResponse(ctx context.Context, req api.CreateMessageReques
 		// because the DeepSeek web API has no concept of resumable
 		// streaming — if a request fails mid-stream, we have to start over.
 		var (
-			newID string
-			err   error
+			newID   string
+			err     error
+			lastErr error
 		)
 		for attempt := 0; attempt < maxRetries; attempt++ {
 			if attempt > 0 {
-				// Exponential backoff with jitter. Bounded so we don't sleep
-				// forever on repeated failures.
-				backoff := time.Duration(1<<attempt) * 200 * time.Millisecond
+				// Exponential backoff. Rate limits get a much longer wait
+				// (DeepSeek's "Server is busy" can last for minutes per key)
+				// while generic transient errors get the original short backoff.
+				var backoff time.Duration
+				if lastErr != nil && IsRateLimitError(lastErr.Error()) {
+					backoff = time.Duration(1<<attempt) * 30 * time.Second
+					// Rotate the token so the next attempt uses a fresh
+					// quota. The token manager has up to 3 keys (the user
+					// token + the 2 hardcoded fallbacks).
+					if newTok := c.web.RotateToken(); newTok != "" {
+						fmt.Fprintf(os.Stderr, "[deepseek] rate-limited: rotated to new token and resetting session\n")
+						c.resetSession()
+					}
+				} else {
+					backoff = time.Duration(1<<attempt) * 200 * time.Millisecond
+				}
 				select {
 				case <-time.After(backoff):
 				case <-ctx.Done():
@@ -410,6 +424,7 @@ func (c *Client) StreamResponse(ctx context.Context, req api.CreateMessageReques
 			if err == nil {
 				break
 			}
+			lastErr = err
 			if !isTransient(err.Error()) {
 				break
 			}

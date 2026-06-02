@@ -9,6 +9,7 @@ import (
 	"regexp"
 	"strings"
 	"text/template"
+	"time"
 
 	"claw-code-go/internal/api"
 )
@@ -227,13 +228,100 @@ func lastAssistantText(messages []api.Message) string {
 // hits MaxIterations without the spec being completed.
 var ErrRalphMaxIterations = errors.New("ralph: max iterations reached without completion")
 
+// ErrRalphGiveUp is returned when every retry+rotation attempt has
+// failed for the same iteration. The loop exits with this error so
+// callers can distinguish "spec not done yet" from "the upstream
+// LLM is genuinely unreachable."
+var ErrRalphGiveUp = errors.New("ralph: gave up after exhausting retries+rotations")
+
 // IterFn is the per-iteration hook used by RunRalphLoopWithIter.
 // Production code calls RunRalphLoop; tests inject a fake.
 type IterFn func(ctx context.Context, iteration, maxIter int) (RalphVerdictKind, string, error)
 
+// ralphRetryConfig controls how RunRalphLoopWithIter handles
+// transient per-iteration errors and "stupid loop" detection. All
+// fields have sensible defaults; tests can override them via the
+// ralphRetryEnv hook.
+type ralphRetryConfig struct {
+	// maxRetriesPerIter is how many times to retry a single
+	// iteration on a transient error before giving up. The deepseek
+	// provider already retries 3 times internally per stream; this
+	// layer handles errors that survive that (e.g. session
+	// poisoning, sustained rate limit) by re-running the whole
+	// iteration with a fresh context.
+	maxRetriesPerIter int
+	// baseBackoff is the first retry delay; subsequent retries
+	// double it (capped at maxBackoff).
+	baseBackoff time.Duration
+	maxBackoff  time.Duration
+	// stupidLoopThreshold: if the same finalText repeats this many
+	// times in a row, the loop assumes the provider is stuck (e.g.
+	// rate limit mid-response, model echoing itself) and forces a
+	// backoff before the next attempt.
+	stupidLoopThreshold int
+}
+
+var defaultRalphRetry = ralphRetryConfig{
+	maxRetriesPerIter:   5,
+	baseBackoff:         30 * time.Second,
+	maxBackoff:          5 * time.Minute,
+	stupidLoopThreshold: 2,
+}
+
+// looksLikeTransientRalphError matches errors that warrant a retry
+// of the whole iteration. We deliberately err on the side of
+// retrying — a wasted 30s sleep is much cheaper than a human
+// restarting the loop.
+func looksLikeTransientRalphError(err error) bool {
+	if err == nil {
+		return false
+	}
+	s := strings.ToLower(err.Error())
+	// Context cancellation is never transient.
+	if strings.Contains(s, "context canceled") || strings.Contains(s, "context deadline exceeded") {
+		return false
+	}
+	hints := []string{
+		"stream error",
+		"server is busy",
+		"too frequent",
+		"rate limit",
+		"rate_limit_reached",
+		"429",
+		"500",
+		"502",
+		"503",
+		"504",
+		"connection reset",
+		"connection refused",
+		"timeout",
+		"eof",
+		"temporarily unavailable",
+		"no session id",
+		"pow",
+	}
+	for _, h := range hints {
+		if strings.Contains(s, h) {
+			return true
+		}
+	}
+	return false
+}
+
 // RunRalphLoopWithIter drives the Ralph loop with an injected
 // iteration function. Most callers want RunRalphLoop; this
 // version is exposed for testability.
+//
+// Resilience features (all opt-out via test override):
+//   - Per-iteration transient errors are retried with exponential
+//     backoff (30s → 60s → 120s → 240s → 300s).
+//   - When the same finalText repeats stupidLoopThreshold times in
+//     a row, the loop assumes the provider is stuck and backs off
+//     before the next attempt. The deepseek provider's own token
+//     rotation is what unsticks it.
+//   - After maxRetriesPerIter consecutive transient failures the
+//     loop returns ErrRalphGiveUp so callers don't sit in a tight
+//     crash loop.
 func RunRalphLoopWithIter(ctx context.Context, cfg RalphConfig, iter IterFn) error {
 	maxIter := cfg.MaxIterations
 	if maxIter <= 0 {
@@ -242,14 +330,65 @@ func RunRalphLoopWithIter(ctx context.Context, cfg RalphConfig, iter IterFn) err
 	if maxIter > MaxRalphIterations {
 		maxIter = MaxRalphIterations
 	}
+	rc := defaultRalphRetry
+
+	// Track the last few finalText outputs to detect stupid loops.
+	recent := make([]string, 0, rc.stupidLoopThreshold)
+	consecutiveStuck := 0
+
 	for i := 1; i <= maxIter; i++ {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		verdict, text, err := iter(ctx, i, maxIter)
-		if err != nil {
-			return fmt.Errorf("iteration %d: %w", i, err)
+
+		// Stupid-loop guard: if the model has produced the same
+		// finalText N times in a row, back off before trying again.
+		// This is the "toggling 2 keys" case: the provider is rate
+		// limited and the model is echoing itself.
+		if consecutiveStuck >= rc.stupidLoopThreshold {
+			backoff := rc.baseBackoff
+			fmt.Fprintf(os.Stderr, "[ralph] iter %d: stuck on same output %d times; backing off %v before next attempt\n", i, consecutiveStuck, backoff)
+			select {
+			case <-time.After(backoff):
+			case <-ctx.Done():
+				return ctx.Err()
+			}
+			consecutiveStuck = 0
 		}
+
+		var (
+			verdict RalphVerdictKind
+			text    string
+			err     error
+		)
+		for attempt := 0; attempt <= rc.maxRetriesPerIter; attempt++ {
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+			verdict, text, err = iter(ctx, i, maxIter)
+			if err == nil {
+				break
+			}
+			if !looksLikeTransientRalphError(err) {
+				// Non-transient: surface immediately, no retry.
+				return fmt.Errorf("iteration %d: %w", i, err)
+			}
+			if attempt == rc.maxRetriesPerIter {
+				fmt.Fprintf(os.Stderr, "[ralph] iter %d: giving up after %d transient attempts: %v\n", i, attempt+1, err)
+				return fmt.Errorf("%w (iter=%d, last_err=%v)", ErrRalphGiveUp, i, err)
+			}
+			backoff := rc.baseBackoff << attempt
+			if backoff > rc.maxBackoff {
+				backoff = rc.maxBackoff
+			}
+			fmt.Fprintf(os.Stderr, "[ralph] iter %d: transient error (attempt %d/%d), retrying in %v: %v\n", i, attempt+1, rc.maxRetriesPerIter+1, backoff, err)
+			select {
+			case <-time.After(backoff):
+			case <-ctx.Done():
+				return ctx.Err()
+			}
+		}
+
 		fmt.Fprintf(os.Stderr, "[ralph] iter %d/%d: verdict=%v text=%q\n", i, maxIter, verdict, text)
 		if verdict == RalphVerdictDone {
 			return nil
@@ -259,6 +398,23 @@ func RunRalphLoopWithIter(ctx context.Context, cfg RalphConfig, iter IterFn) err
 			// Treat as done so the loop doesn't run forever.
 			fmt.Fprintf(os.Stderr, "[ralph] iter %d reported blocked; exiting cleanly\n", i)
 			return nil
+		}
+
+		// Stupid-loop bookkeeping. We only count "echo" of the
+		// same text; an empty or whitespace-only text never counts
+		// (that's an iteration that produced no output, not a stuck
+		// model).
+		trimmed := strings.TrimSpace(text)
+		if trimmed == "" {
+			consecutiveStuck = 0
+		} else if len(recent) > 0 && recent[len(recent)-1] == trimmed {
+			consecutiveStuck++
+		} else {
+			consecutiveStuck = 1
+		}
+		recent = append(recent, trimmed)
+		if len(recent) > rc.stupidLoopThreshold {
+			recent = recent[len(recent)-rc.stupidLoopThreshold:]
 		}
 	}
 	return fmt.Errorf("%w (max=%d)", ErrRalphMaxIterations, cfg.MaxIterations)
