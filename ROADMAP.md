@@ -148,7 +148,7 @@ viewport with touch input, and gracefully scale up to desktop.
   `<header>`, `<main id="messages">`, `<form id="composer">`,
   `<footer>`. Viewport meta: `width=device-width, initial-scale=1,
   viewport-fit=cover`. Theme color meta for the OS chrome.
-- [ ] **CSS reset + design tokens** (`chat.css`): CSS custom
+- [x] **CSS reset + design tokens** (`chat.css`): CSS custom
   properties for colors, spacing, type scale. Light + dark mode
   via `prefers-color-scheme` AND a manual toggle persisted in
   `localStorage`. Use `clamp()` for fluid typography.
