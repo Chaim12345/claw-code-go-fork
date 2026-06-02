@@ -92,7 +92,7 @@ same `ConversationLoop` — only the wire format differs.
       (user_input → SendMessage, permission_reply → PermReply, etc.).
     - Be testable in isolation (split into a `runChatSession` function
       that takes a `*ConversationLoop` and a `json.Encoder`/`Decoder`).
-- [ ] **Add Go tests** for the chat WS endpoint in
+- [x] **Add Go tests** for the chat WS endpoint in
   `internal/web/chat_test.go`:
     - round-trip a fake client (gorilla `websocket` test client) and
       verify the server emits `chat_session_init` then echoes a

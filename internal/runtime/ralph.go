@@ -384,6 +384,9 @@ func looksLikeTransientRalphError(err error) bool {
 // iteration function. Most callers want RunRalphLoop; this
 // version is exposed for testability.
 //
+// cfg is passed by pointer so the self-debug pass can mutate
+// cfg.LastError to inject the last error into the next prompt.
+//
 // Resilience features (all opt-out via test override):
 //   - Per-iteration transient errors are retried with exponential
 //     backoff (30s → 60s → 120s → 240s → 300s).
@@ -392,9 +395,12 @@ func looksLikeTransientRalphError(err error) bool {
 //     before the next attempt. The deepseek provider's own token
 //     rotation is what unsticks it.
 //   - After maxRetriesPerIter consecutive transient failures the
-//     loop returns ErrRalphGiveUp so callers don't sit in a tight
-//     crash loop.
-func RunRalphLoopWithIter(ctx context.Context, cfg RalphConfig, iter IterFn) error {
+//     loop runs ONE self-debug pass (if cfg.SelfDebug is true):
+//     the next iter gets a "## Self-debug" prompt section naming
+//     the error and is tasked with fixing the root cause. Only
+//     if the debug pass also fails does the loop return
+//     ErrRalphGiveUp.
+func RunRalphLoopWithIter(ctx context.Context, cfg *RalphConfig, iter IterFn) error {
 	maxIter := cfg.MaxIterations
 	if maxIter <= 0 {
 		maxIter = DefaultRalphMaxIterations
@@ -432,6 +438,7 @@ func RunRalphLoopWithIter(ctx context.Context, cfg RalphConfig, iter IterFn) err
 			verdict RalphVerdictKind
 			text    string
 			err     error
+			lastErr error
 		)
 		for attempt := 0; attempt <= rc.maxRetriesPerIter; attempt++ {
 			if err := ctx.Err(); err != nil {
@@ -441,13 +448,16 @@ func RunRalphLoopWithIter(ctx context.Context, cfg RalphConfig, iter IterFn) err
 			if err == nil {
 				break
 			}
+			lastErr = err
 			if !looksLikeTransientRalphError(err) {
-				// Non-transient: surface immediately, no retry.
-				return fmt.Errorf("iteration %d: %w", i, err)
+				// Non-transient: skip retries, fall through to the
+				// self-debug pass below.
+				break
 			}
 			if attempt == rc.maxRetriesPerIter {
-				fmt.Fprintf(os.Stderr, "[ralph] iter %d: giving up after %d transient attempts: %v\n", i, attempt+1, err)
-				return fmt.Errorf("%w (iter=%d, last_err=%v)", ErrRalphGiveUp, i, err)
+				// Exhausted transient retries; fall through to the
+				// self-debug pass.
+				break
 			}
 			backoff := rc.baseBackoff << attempt
 			if backoff > rc.maxBackoff {
@@ -459,6 +469,42 @@ func RunRalphLoopWithIter(ctx context.Context, cfg RalphConfig, iter IterFn) err
 			case <-ctx.Done():
 				return ctx.Err()
 			}
+		}
+
+		// Self-debug pass: if the iter failed (either non-transient
+		// or transient-after-exhaustion) and SelfDebug is on, give
+		// the model ONE more iteration with a meta-prompt that names
+		// the error and tells it to fix the root cause. The
+		// captured cfg pointer lets us inject the error string.
+		if err != nil && cfg.SelfDebug {
+			fmt.Fprintf(os.Stderr, "[ralph] iter %d: entering self-debug pass (last error: %v)\n", i, err)
+			cfg.LastError = err.Error()
+			// Brief backoff so the model isn't immediately thrashed.
+			select {
+			case <-time.After(10 * time.Second):
+			case <-ctx.Done():
+				return ctx.Err()
+			}
+			debugVerdict, debugText, debugErr := iter(ctx, i, maxIter)
+			fmt.Fprintf(os.Stderr, "[ralph] iter %d self-debug: verdict=%v text=%q err=%v\n", i, debugVerdict, debugText, debugErr)
+			// Clear LastError so subsequent iters get a clean prompt.
+			cfg.LastError = ""
+			if debugErr == nil {
+				verdict, text, err = debugVerdict, debugText, nil
+			} else {
+				// Self-debug also failed. Fall through to give up.
+				fmt.Fprintf(os.Stderr, "[ralph] iter %d: self-debug also failed; giving up\n", i)
+				if looksLikeTransientRalphError(err) {
+					return fmt.Errorf("%w (iter=%d, last_err=%v, debug_err=%v)", ErrRalphGiveUp, i, lastErr, debugErr)
+				}
+				return fmt.Errorf("%w (iter=%d, last_err=%v)", ErrRalphGiveUp, i, err)
+			}
+		} else if err != nil {
+			// SelfDebug off or last error was already terminal.
+			if looksLikeTransientRalphError(err) {
+				return fmt.Errorf("%w (iter=%d, last_err=%v)", ErrRalphGiveUp, i, err)
+			}
+			return fmt.Errorf("iteration %d: %w", i, err)
 		}
 
 		fmt.Fprintf(os.Stderr, "[ralph] iter %d/%d: verdict=%v text=%q\n", i, maxIter, verdict, text)
