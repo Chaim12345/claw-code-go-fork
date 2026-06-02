@@ -100,7 +100,7 @@ same `ConversationLoop` — only the wire format differs.
     - verify a `permission_reply` decodes and reaches `PermReply`.
   No live API calls required — use a fake `api.APIClient` that
   emits canned events from a channel.
-- [ ] **Document the protocol** in `docs/web-protocol.md` (new file)
+- [x] **Document the protocol** in `docs/web-protocol.md` (new file)
   with a Mermaid sequence diagram showing one full turn (user input →
   text deltas → tool call → tool result → end_turn).
 
