@@ -14,7 +14,14 @@ import (
 	"strings"
 )
 
-const systemPromptBase = `You are Claude Code, an AI assistant for software engineering tasks. You have access to tools for running bash commands, reading and writing files, searching with glob patterns, and grepping for patterns in code. Use these tools to help users with coding tasks.`
+const systemPromptBase = `You are Claude Code, an AI assistant for software engineering tasks. You have access to tools for running bash commands, reading and writing files, searching with glob patterns, and grepping for patterns in code. Use these tools to help users with coding tasks.
+
+IMPORTANT: When using tools, prefer XML format over JSON for better streaming compatibility:
+<tool_name>
+<parameter_name>value</parameter_name>
+</tool_name>
+
+JSON format is supported as a fallback but XML is preferred.`
 
 // ConversationLoop manages the agentic conversation loop with tool use.
 type ConversationLoop struct {
@@ -117,13 +124,22 @@ func (loop *ConversationLoop) allTools() []api.Tool {
 
 // SendMessage sends a user message and runs the full agentic loop.
 func (loop *ConversationLoop) SendMessage(ctx context.Context, userText string) error {
-	// Append user message
-	loop.Session.Messages = append(loop.Session.Messages, api.Message{
+	// Create and validate user message
+	userMsg := api.Message{
 		Role: "user",
 		Content: []api.ContentBlock{
 			{Type: "text", Text: userText},
 		},
-	})
+	}
+	
+	// Truncate if message exceeds size limits
+	userMsg, wasTruncated := ValidateAndTruncateMessage(userMsg)
+	if wasTruncated {
+		fmt.Fprintf(os.Stderr, "[message-limit] user message truncated to fit provider limits\n")
+	}
+	
+	// Append validated message
+	loop.Session.Messages = append(loop.Session.Messages, userMsg)
 
 	// Compact history if approaching the token budget (Phase 6).
 	if ShouldCompact(loop.Compaction.LastInputTokens, loop.Session.Messages, loop.Config) {
@@ -394,12 +410,25 @@ func (loop *ConversationLoop) runOneTurn(ctx context.Context) (string, int, int,
 // TurnEvents to the provided channel. The channel is NOT closed by this function;
 // callers should close it after this returns.
 func (loop *ConversationLoop) SendMessageStreaming(ctx context.Context, userText string, events chan<- TurnEvent) error {
-	loop.Session.Messages = append(loop.Session.Messages, api.Message{
+	// Create and validate user message
+	userMsg := api.Message{
 		Role: "user",
 		Content: []api.ContentBlock{
 			{Type: "text", Text: userText},
 		},
-	})
+	}
+	
+	// Truncate if message exceeds size limits
+	userMsg, wasTruncated := ValidateAndTruncateMessage(userMsg)
+	if wasTruncated {
+		events <- TurnEvent{
+			Type: TurnEventWarn,
+			Text: "Your message was truncated to fit provider size limits. The full content is preserved in the conversation history.",
+		}
+	}
+	
+	// Append validated message
+	loop.Session.Messages = append(loop.Session.Messages, userMsg)
 
 	// Compact history if approaching the token budget (Phase 6).
 	if ShouldCompact(loop.Compaction.LastInputTokens, loop.Session.Messages, loop.Config) {

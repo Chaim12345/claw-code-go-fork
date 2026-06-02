@@ -110,13 +110,16 @@ func (c *Client) ensureSession(ctx context.Context) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.chatSessionID != "" {
+		debugLog("Reusing existing session: %s", c.chatSessionID)
 		return nil
 	}
+	debugLog("Creating new chat session")
 	sessID, err := c.web.CreateChatSession()
 	if err != nil {
 		return fmt.Errorf("deepseek: create session: %w", err)
 	}
 	c.chatSessionID = sessID
+	debugLog("Created session: %s", sessID)
 	return nil
 }
 
@@ -148,6 +151,33 @@ func isTransient(errMsg string) bool {
 		}
 	}
 	return false
+}
+
+// debugDeepSeek enables debug logging when DEEPSEEK_DEBUG=1
+var debugDeepSeek = os.Getenv("DEEPSEEK_DEBUG") == "1"
+
+func debugLog(format string, args ...interface{}) {
+	if debugDeepSeek {
+		fmt.Fprintf(os.Stderr, "[deepseek-debug] "+format+"\n", args...)
+	}
+}
+
+// resetSession clears the session state, forcing a new session on next request
+func (c *Client) resetSession() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.chatSessionID = ""
+	c.parentMessageID = ""
+	debugLog("Session reset - will create new session on next request")
+}
+
+// isSessionError checks if an error indicates session expiry/invalidity
+func isSessionError(errMsg string) bool {
+	low := strings.ToLower(errMsg)
+	return strings.Contains(low, "session") &&
+		(strings.Contains(low, "expired") ||
+			strings.Contains(low, "invalid") ||
+			strings.Contains(low, "not found"))
 }
 
 // StreamResponse sends a streaming request to DeepSeek and returns a channel
@@ -202,6 +232,7 @@ func (c *Client) StreamResponse(ctx context.Context, req api.CreateMessageReques
 	parentID := c.parentMessageID
 	sessID := c.chatSessionID
 	c.mu.Unlock()
+	debugLog("StreamResponse: session=%s parent=%s", sessID, parentID)
 	var parentPtr *string
 	if parentID != "" {
 		parentPtr = &parentID
@@ -375,6 +406,11 @@ func (c *Client) StreamResponse(ctx context.Context, req api.CreateMessageReques
 			fmt.Fprintf(os.Stderr, "[deepseek] transient error: %v\n", err)
 		}
 		if err != nil {
+			// Check if this is a session error and reset for recovery
+			if isSessionError(err.Error()) {
+				debugLog("Session error detected, resetting session: %v", err)
+				c.resetSession()
+			}
 			send(api.StreamEvent{
 				Type:         api.EventError,
 				ErrorMessage: fmt.Sprintf("deepseek: %s", err.Error()),
@@ -385,6 +421,9 @@ func (c *Client) StreamResponse(ctx context.Context, req api.CreateMessageReques
 			c.mu.Lock()
 			c.parentMessageID = newID
 			c.mu.Unlock()
+			debugLog("Parent message ID updated: %s", newID)
+		} else {
+			debugLog("Warning: no parent message ID received from stream")
 		}
 
 		// If we hit the output budget mid-tool-call, append a marker so the

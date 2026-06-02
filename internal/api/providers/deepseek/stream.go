@@ -55,13 +55,29 @@ func ExtractToolCalls(text string) []api.ToolCall {
 	if len(text) == 0 {
 		return nil
 	}
+	
+	// Fast path: check for tool call indicators before expensive parsing
+	hasToolIndicators := strings.Contains(text, "tool_calls") ||
+		strings.Contains(text, "function_call") ||
+		strings.Contains(text, "Action:") ||
+		strings.Contains(text, "<tool_") ||
+		strings.Contains(text, "{\"tool")
+	
+	if !hasToolIndicators {
+		return nil
+	}
+	
+	// Collapse excessive tool_calls tags before parsing
 	if strings.Count(text, "<tool_calls>") > 50 {
 		text = collapseExcessiveToolCalls(text)
 	}
-	if calls := extractJsonToolCalls(text); len(calls) > 0 {
+	
+	// Try XML first (preferred for DeepSeek, better streaming compatibility)
+	if calls := extractXmlToolCalls(text); len(calls) > 0 {
 		return calls
 	}
-	if calls := extractXmlToolCalls(text); len(calls) > 0 {
+	// Fallback to JSON
+	if calls := extractJsonToolCalls(text); len(calls) > 0 {
 		return calls
 	}
 	if calls := extractCodeBlockToolCalls(text); len(calls) > 0 {

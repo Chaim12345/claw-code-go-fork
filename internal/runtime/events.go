@@ -10,6 +10,7 @@ const (
 	TurnEventToolDone                           // tool execution complete
 	TurnEventUsage                              // token usage update
 	TurnEventDone                               // turn fully complete
+	TurnEventWarn                               // warning message (e.g., message truncation)
 	TurnEventError                              // error occurred
 	TurnEventPermissionAsk                      // permission check required — send reply on PermReply
 	TurnEventAskUser                            // agent needs user input — send reply on AskUserReply

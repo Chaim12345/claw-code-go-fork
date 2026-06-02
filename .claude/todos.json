@@ -1,14 +1,44 @@
 [
   {
     "id": "1",
-    "content": "Identify and fix the root cause of premature turn termination (markdown-fence tool calls mapping to 'input' instead of correct parameter name)",
-    "status": "done",
+    "content": "Map codebase structure and understand architecture",
+    "status": "in_progress",
     "priority": "high"
   },
   {
     "id": "2",
-    "content": "Verify the fix resolves the premature termination loop",
-    "status": "done",
+    "content": "Review TUI layer for bugs (model, styles, theme, markdown, diff, etc.)",
+    "status": "pending",
+    "priority": "high"
+  },
+  {
+    "id": "3",
+    "content": "Review runtime layer (agent, session, conversation, compact, autonomous)",
+    "status": "pending",
+    "priority": "high"
+  },
+  {
+    "id": "4",
+    "content": "Review tools layer (bash, file_edit, grep, glob, etc.)",
+    "status": "pending",
+    "priority": "high"
+  },
+  {
+    "id": "5",
+    "content": "Review API/providers layer (deepseek, anthropic, openai, etc.)",
+    "status": "pending",
+    "priority": "high"
+  },
+  {
+    "id": "6",
+    "content": "Review MCP, auth, config, permissions, context layers",
+    "status": "pending",
+    "priority": "medium"
+  },
+  {
+    "id": "7",
+    "content": "Compile bug report with findings",
+    "status": "pending",
     "priority": "high"
   }
 ]

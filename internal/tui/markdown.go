@@ -7,238 +7,97 @@ import (
 	"github.com/charmbracelet/glamour"
 )
 
-// mdRenderer caches a glamour renderer keyed by viewport width so we
-// don't allocate a new one on every View() call.
+// markdownRenderer is a pooled glamour renderer used to format assistant
+// text and tool results. Built lazily on first use with a style that
+// matches the active TUI theme — we default to "dark" and let users
+// override via the /theme command (we also rebuild the renderer on
+// theme change).
 var (
-	mdRendererMu sync.Mutex
-	mdRenderer   *glamour.TermRenderer
-	mdLastWidth  int
+	mdRendererMu    sync.Mutex
+	mdRenderer      *glamour.TermRenderer
+	mdRendererStyle = "dark"
 )
 
-// RenderMarkdown converts markdown text to terminal-ANSI styled output
-// using the glamour "dark" or "light" style depending on the active theme.
-// The output width is clamped to w so code blocks and tables don't overflow.
-func RenderMarkdown(md string, w int) string {
-	if md == "" {
+// renderMarkdown formats s as terminal markdown. If the glamour renderer
+// isn't initialised (or is built for a different style), it rebuilds
+// itself to match. Empty input returns an empty string.
+func renderMarkdown(s string) string {
+	if strings.TrimSpace(s) == "" {
 		return ""
 	}
-	// Ensure a minimum width so glamour doesn't panic on 0.
-	if w < 40 {
-		w = 40
-	}
-	// glamour adds its own margins — allow the content to use most of the width.
-	renderWidth := w - 2
-	if renderWidth < 40 {
-		renderWidth = 40
-	}
-
+	
 	mdRendererMu.Lock()
 	defer mdRendererMu.Unlock()
-
-	if mdRenderer == nil || mdLastWidth != renderWidth {
-		var style string
-		if currentTheme == LightTheme {
-			style = "light"
-		} else {
-			style = "dark"
+	
+	if mdRenderer == nil || mdRendererStyle != currentTheme.Name {
+		if err := rebuildMarkdownRenderer(); err != nil {
+			// Fall back to plain text on any renderer error — the assistant
+			// output still flows through to the user.
+			return s
 		}
-		r, err := glamour.NewTermRenderer(
-			glamour.WithStylesFromJSONBytes([]byte(glamourTheme(style))),
-			glamour.WithWordWrap(renderWidth),
-		)
-		if err != nil {
-			// Fallback: return the raw markdown if glamour init fails.
-			return md
-		}
-		mdRenderer = r
-		mdLastWidth = renderWidth
 	}
-
-	out, err := mdRenderer.Render(md)
+	out, err := mdRenderer.Render(s)
 	if err != nil {
-		return md
+		return s
 	}
-	// glamour often appends a trailing newline. Trim one so we don't
-	// inject extra blank lines into the viewport.
-	return strings.TrimSuffix(out, "\n")
+	return strings.TrimRight(out, "\n")
 }
 
-// RenderUserMarkdown is a convenience wrapper that prefixes the rendered
-// output with the user label.
-func RenderUserMarkdown(text string, width int) string {
-	label := userLabelStyle.Render("You") + ": "
-	if !looksLikeMarkdown(text) {
-		return label + text + "\n\n"
+func rebuildMarkdownRenderer() error {
+	style := "dark"
+	if currentTheme.Name == "light" {
+		style = "light"
 	}
-	return label + "\n" + RenderMarkdown(text, width) + "\n\n"
+	mdRendererStyle = style
+	r, err := glamour.NewTermRenderer(
+		glamour.WithStylePath(style),
+		glamour.WithWordWrap(max(40, 100)),
+		glamour.WithEmoji(),
+	)
+	if err != nil {
+		return err
+	}
+	mdRenderer = r
+	return nil
 }
 
-// RenderAssistantMarkdown is a convenience wrapper that prefixes the rendered
-// output with the assistant label.
-func RenderAssistantMarkdown(text string, width int) string {
-	label := assistantLabelStyle.Render("Claude") + ": "
-	if !looksLikeMarkdown(text) {
-		return label + text + "\n"
+// renderBufferSegments splits a streamed buffer into markdown text and
+// tool-card lines, renders the markdown portions through glamour, and
+// returns the recombined string. Lines starting with "  ◆" or "  ✓"
+// (tool cards) and "  [Tool:" markers are passed through untouched so
+// styling is preserved.
+func renderBufferSegments(s string) string {
+	if s == "" {
+		return ""
 	}
-	return label + "\n" + RenderMarkdown(text, width) + "\n"
-}
-
-// looksLikeMarkdown returns true if the text contains markdown syntax
-// markers worth rendering (code fences, lists, headings, tables, bold, etc.).
-// Short plain-text messages skip the glamour renderer entirely — this
-// avoids the latency hit on fast chat turns where there's nothing to format.
-func looksLikeMarkdown(text string) bool {
-	// Multi-paragraph text is likely worth formatting.
-	if strings.Count(text, "\n\n") >= 1 {
-		return true
+	lines := strings.Split(s, "\n")
+	var out strings.Builder
+	var mdBuf strings.Builder
+	flushMD := func() {
+		if mdBuf.Len() == 0 {
+			return
+		}
+		out.WriteString(renderMarkdown(mdBuf.String()))
+		out.WriteString("\n")
+		mdBuf.Reset()
 	}
-	markers := []string{"```", "# ", "## ", "### ", "- ", "* ", "1. ", "| ", "**", "`", "["}
-	for _, m := range markers {
-		if strings.Contains(text, m) {
-			return true
+	for _, line := range lines {
+		if isToolLine(line) {
+			flushMD()
+			out.WriteString(line)
+			out.WriteString("\n")
+		} else {
+			mdBuf.WriteString(line)
+			mdBuf.WriteString("\n")
 		}
 	}
-	return false
+	flushMD()
+	return strings.TrimRight(out.String(), "\n")
 }
 
-// glamourTheme returns a JSON theme for glamour that blends with the
-// current TUI color scheme. We keep a simple embedded theme so we don't
-// need external files.
-func glamourTheme(mode string) string {
-	if mode == "light" {
-		return lightGlamourJSON
-	}
-	return darkGlamourJSON
+func isToolLine(s string) bool {
+	t := strings.TrimSpace(s)
+	return strings.HasPrefix(t, "◆") || strings.HasPrefix(t, "✓") ||
+		strings.HasPrefix(t, "[Tool:") || strings.HasPrefix(t, "[Assistant tool call:") ||
+		strings.HasPrefix(s, "  ◆") || strings.HasPrefix(s, "  ✓")
 }
-
-const darkGlamourJSON = `{
-  "dark": {
-    "document": {
-      "style": "",
-      "margin": 0
-    },
-    "block_quote": {
-      "prefix": "▍ ",
-      "style": "#757575"
-    },
-    "paragraph": { "style": "", "margin": 0 },
-    "heading": {
-      "style": "bold",
-      "color": "#d787ff",
-      "margin": 0
-    },
-    "h1": {
-      "style": "bold",
-      "color": "#d787ff",
-      "background_color": "",
-      "prefix": "",
-      "suffix": "",
-      "margin": 0
-    },
-    "h2": {
-      "style": "bold",
-      "color": "#d787ff",
-      "margin": 0
-    },
-    "h3": {
-      "style": "bold",
-      "color": "#d787ff",
-      "margin": 0
-    },
-    "h4": {
-      "style": "bold",
-      "color": "#d787ff",
-      "margin": 0
-    },
-    "strong": { "style": "bold", "color": "#ffffff" },
-    "emph": { "style": "italic", "color": "#ffffff" },
-    "code": {
-      "style": "",
-      "color": "#ff87af",
-      "background_color": "#303030",
-      "margin": 0
-    },
-    "code_block": {
-      "style": "",
-      "color": "#e0e0e0",
-      "background_color": "",
-      "margin": 0
-    },
-    "link": { "style": "underline", "color": "#5fafff" },
-    "link_text": { "style": "underline", "color": "#5fafff" },
-    "list": { "style": "", "margin": 0, "level_indent": 2 },
-    "item": { "style": "", "margin": 0 },
-    "hr": { "style": "", "color": "#757575" },
-    "image": { "style": "", "color": "#757575" },
-    "table": { "style": "", "margin": 0 },
-    "table_header": { "style": "bold", "color": "#ffffff" },
-    "definition_description": { "style": "", "margin": 0 },
-    "html_block": { "style": "", "margin": 0 }
-  }
-}`
-
-const lightGlamourJSON = `{
-  "light": {
-    "document": {
-      "style": "",
-      "margin": 0
-    },
-    "block_quote": {
-      "prefix": "▍ ",
-      "style": "#949494"
-    },
-    "paragraph": { "style": "", "margin": 0 },
-    "heading": {
-      "style": "bold",
-      "color": "#af005f",
-      "margin": 0
-    },
-    "h1": {
-      "style": "bold",
-      "color": "#af005f",
-      "background_color": "",
-      "prefix": "",
-      "suffix": "",
-      "margin": 0
-    },
-    "h2": {
-      "style": "bold",
-      "color": "#af005f",
-      "margin": 0
-    },
-    "h3": {
-      "style": "bold",
-      "color": "#af005f",
-      "margin": 0
-    },
-    "h4": {
-      "style": "bold",
-      "color": "#af005f",
-      "margin": 0
-    },
-    "strong": { "style": "bold", "color": "#080808" },
-    "emph": { "style": "italic", "color": "#080808" },
-    "code": {
-      "style": "",
-      "color": "#af005f",
-      "background_color": "#e8e8e8",
-      "margin": 0
-    },
-    "code_block": {
-      "style": "",
-      "color": "#080808",
-      "background_color": "",
-      "margin": 0
-    },
-    "link": { "style": "underline", "color": "#005faf" },
-    "link_text": { "style": "underline", "color": "#005faf" },
-    "list": { "style": "", "margin": 0, "level_indent": 2 },
-    "item": { "style": "", "margin": 0 },
-    "hr": { "style": "", "color": "#949494" },
-    "image": { "style": "", "color": "#949494" },
-    "table": { "style": "", "margin": 0 },
-    "table_header": { "style": "bold", "color": "#080808" },
-    "definition_description": { "style": "", "margin": 0 },
-    "html_block": { "style": "", "margin": 0 }
-  }
-}`
