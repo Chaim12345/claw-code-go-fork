@@ -80,19 +80,42 @@ Source: https://docs.anthropic.com/en/api/claude-code
 
 ## 7. Mobile Chat UI Patterns (ChatGPT, Claude.ai, Perplexity)
 
-Sources: OpenAI ChatGPT web updates, community implementations, platform-specific docs
+Sources: OpenAI ChatGPT web updates (Nov 2024), Claude.ai design docs, Perplexity UX analysis, community implementations, platform-specific docs
 
-- **Sticky composer bar at the bottom**: Universal pattern. The text input is fixed at the viewport bottom, with messages scrolling above it. Uses `position: sticky` or `position: fixed`.
+### ChatGPT Web (Nov 2024 redesign)
+- **Floating sidebar with auto-dismiss**: On mobile, the sidebar is always in floating mode and auto-closes when switching threads. On desktop, it can be pinned open alongside the canvas if space permits.
+- **Composer bar with fade effect**: The composer sits at the bottom with content fading underneath as you scroll. "New chat" button moved left of the model picker for easier reach.
+- **Improved on-screen keyboard handling**: Major fixes for iOS & Android keyboard behavior. Composer is not auto-focused when switching conversations, preventing jarring keyboard pop-ups.
+- **Scroll behavior fixes**: New conversations scroll into view at top of screen; no auto-scroll to bottom during message generation (user can read previous messages while waiting).
+- **System icon removed**: Removed to save horizontal space on narrow screens.
+
+### Claude.ai Mobile Patterns
+- **Responsive layout generation**: Claude.ai encourages building with responsive web techniques — designs that adapt across desktop, tablet, and mobile viewports without separate codebases.
+- **Safe area compliance**: Official design guidelines mandate respecting safe areas on notched devices and handling constrained viewports for touch interaction.
+- **Native-feature integration**: Mobile apps surface native OS capabilities (calendar invites, email drafts, messages) via tool calls, but the web UI must handle these through structured fallback dialogs.
+
+### Perplexity Mobile UX Principles (based on Nielsen heuristics)
+- **System status visibility**: "Considering 8 sources…" status indicator builds trust during AI processing. Shows source count, progress feedback.
+- **Recognition over recall**: Suggested follow-up questions appear after each answer — user taps rather than types. Reduces cognitive load on mobile.
+- **Thumb-friendly design (Fitts's Law)**: All primary tap targets placed in the thumb zone (bottom 60% of screen). Minimum 44x44dp touch targets.
+- **Text-first philosophy**: Focus on content readability over UI chrome. Widgets (weather, calculator) added only where AI is unnecessary, keeping the interface clean.
+- **Haptic/tactile feedback**: Use for confirmations of important actions (permission grants, message sends) to reinforce touch interactions.
+- **Error prevention**: Explicit confirmation before destructive actions; clear escape hatches from any flow.
+
+### Universal Mobile Chat Patterns (synthesized)
+- **Sticky composer bar at the bottom**: The text input is fixed at the viewport bottom, with messages scrolling above it. Uses `position: sticky` or `position: fixed`.
 - **Safe area insets on notched phones**: All major chat apps use `env(safe-area-inset-bottom)` to pad the composer above the home indicator. This is mandatory for iPhone X+ and modern Android phones with gesture nav.
-- **Virtual keyboard handling**: The `visualViewport` API is the modern way to detect keyboard open/close. On `resize`, adjust the composer position and scroll the message list to the bottom. Fallback: `window.innerHeight` change detection.
-- **Auto-growing textarea**: Standard practice: `<textarea>` that grows from 1 row to ~8 rows max, then scrolls internally. Accomplished via `scrollHeight` measurement on `input` event.
+- **Virtual keyboard handling**: The `visualViewport` API is the modern way to detect keyboard open/close. On `resize`, adjust the composer position and scroll the message list to the bottom. Fallback: `window.innerHeight` change detection. ChatGPT's fix: don't auto-focus composer on thread switch to prevent keyboard jump.
+- **Auto-growing textarea**: `<textarea>` that grows from 1 row to ~8 rows max, then scrolls internally. Accomplished via `scrollHeight` measurement on `input` event.
 - **Enter to send, Shift+Enter for newline**: Universal chat convention. Mobile keyboards show a "send" action key.
 - **Message bubbles**: User messages right-aligned, AI messages left-aligned. Code blocks in `<pre><code>` with syntax highlighting. Typing indicators (animated dots) while waiting for AI response.
 - **Message virtualization for long threads**: For performance with 1000+ messages, only render visible messages. Libraries: `react-virtuoso`, `react-window`. For vanilla JS: use an `IntersectionObserver` approach or infinite scroll with a cap.
 - **Dark/light mode**: System preference via `prefers-color-scheme` with a manual override toggle persisted in `localStorage`.
-- **Sidebar/drawer pattern**: Session history in a sidebar. On mobile (<768px), it's hidden behind a hamburger menu and slides in as an overlay drawer. On desktop, it's a persistent column.
+- **Sidebar/drawer pattern**: Session history in a sidebar. On mobile (<768px), it's hidden behind a hamburger menu and slides in as an overlay drawer with auto-dismiss on thread switch. On desktop, it's a persistent column.
 - **`aria-live="polite"`**: For screen reader announcements of new messages. Critical for accessibility.
 - **Touch-friendly**: 44px minimum tap targets, adequate spacing between interactive elements, no hover-dependent UI.
+- **Suggested follow-ups**: Tap-to-continue chips after AI responses reduce typing friction on mobile (Perplexity pattern).
+- **Status/thinking indicators**: Show source count, elapsed time, or progress dots during long operations (ChatGPT/Perplexity pattern).
 
 ---
 

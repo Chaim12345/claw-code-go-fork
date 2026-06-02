@@ -47,7 +47,7 @@ mode.
     - https://docs.anthropic.com/en/api/claude-code (any web UI patterns they show)
   Capture findings in a new `WEB_RESEARCH.md` at the repo root with
   short bullet-point notes per source. Don't quote at length — paraphrase.
-- [ ] **Research mobile chat UI patterns**: look at how ChatGPT, Claude.ai,
+- [x] **Research mobile chat UI patterns**: look at how ChatGPT, Claude.ai,
   and Perplexity render on mobile. Use `web_fetch` on their marketing
   pages and any public design blogs. Note: safe-area insets, virtual
   keyboard handling, sticky input bar, message virtualization for long
