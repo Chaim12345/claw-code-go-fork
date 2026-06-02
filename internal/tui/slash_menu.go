@@ -1,63 +1,30 @@
 package tui
 
 import (
-	"sort"
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
 )
 
-// slashMenuItem describes a single slash command shown in the
-// autocomplete popup when the user types "/". Command is the full
-// slash command string (e.g. "/help"), description is the human-
-// readable hint, and args shows the expected arguments syntax.
-type slashMenuItem struct {
-	command     string // e.g. "/help"
-	description string // e.g. "Show available commands"
-	args        string // e.g. "[key] [value]" — hint for arguments
-}
-
 // slashMenu powers the interactive `/` command autocomplete. When the
 // user types `/` in the textarea a floating popup appears above the
 // input area listing all available slash commands. As the user
-// continues typing, the list filters in real-time using the same
-// fuzzy matching as the palette. The user can navigate with ↑/↓,
-// autocomplete with Tab, and execute with Enter. Esc dismisses the
-// popup without clearing the input.
+// continues typing, the list filters in real-time using fuzzy matching
+// backed by the unified commandRegistry. The user can navigate with
+// ↑/↓, autocomplete with Tab, and execute with Enter. Esc dismisses
+// the popup without clearing the input.
 type slashMenu struct {
 	active     bool
-	triggerCol int    // column where the "/" was typed
-	query      string // text after the "/"
+	triggerCol int // column where the "/" was typed
+	query      string
 	cursor     int
-	items      []slashMenuItem
-	filtered   []int // indices into items
+	registry   *commandRegistry
+	filtered   []command
 }
 
 func newSlashMenu() *slashMenu {
 	return &slashMenu{
-		items: allSlashCommands(),
-	}
-}
-
-// allSlashCommands returns the canonical list of all slash commands
-// available in the TUI. Each entry carries a human-readable
-// description and an optional argument-hint string.
-func allSlashCommands() []slashMenuItem {
-	return []slashMenuItem{
-		{"/help", "Show available commands", ""},
-		{"/model", "Change the active model (picker)", ""},
-		{"/login", "Multi-provider login flow", ""},
-		{"/clear", "Clear conversation history", ""},
-		{"/theme", "Switch TUI color theme", "dark|light"},
-		{"/status", "Show model/provider/session info", ""},
-		{"/cost", "Show token usage this session", ""},
-		{"/config", "Show or set config values", "[key] [value]"},
-		{"/session", "Manage sessions", "list|save|load [name]"},
-		{"/sessions", "Browse saved sessions (picker)", ""},
-		{"/todo", "Toggle todo list sidebar", ""},
-		{"/init", "Create .claude/settings.json", ""},
-		{"/exit", "Exit (session auto-saved)", ""},
-		{"/quit", "Exit (session auto-saved)", ""},
+		registry: newCommandRegistry(),
 	}
 }
 
@@ -66,8 +33,7 @@ func allSlashCommands() []slashMenuItem {
 // line (or at position 0). Returns true if the menu should be shown.
 func (s *slashMenu) update(text string) bool {
 	// Only activate if the text starts with "/" (slash command at
-	// the beginning of input). Multi-line inputs with "/" later in
-	// the text should not trigger the menu.
+	// the beginning of input).
 	slash := strings.Index(text, "/")
 	if slash == -1 {
 		s.active = false
@@ -75,7 +41,7 @@ func (s *slashMenu) update(text string) bool {
 	}
 
 	// Activate only if "/" is the first non-whitespace character
-	// on the current line. Find the start of the current line.
+	// on the current line.
 	lineStart := 0
 	lastNewline := strings.LastIndex(text[:slash+1], "\n")
 	if lastNewline != -1 {
@@ -83,12 +49,11 @@ func (s *slashMenu) update(text string) bool {
 	}
 	beforeSlash := text[lineStart:slash]
 	if strings.TrimSpace(beforeSlash) != "" {
-		// "/" is not the first thing on the line.
 		s.active = false
 		return false
 	}
 
-	// Capture the query (text from "/" to end of last word).
+	// Capture the query (text from "/" to end of word).
 	rest := text[slash+1:]
 	end := len(rest)
 	for i := 0; i < len(rest); i++ {
@@ -100,7 +65,7 @@ func (s *slashMenu) update(text string) bool {
 	q := rest[:end]
 	if q != s.query {
 		s.query = q
-		s.filtered = s.filter(q)
+		s.filtered = s.registry.filtered(q)
 		s.cursor = 0
 	}
 	s.active = true
@@ -115,12 +80,12 @@ func (s *slashMenu) insert(text string) (string, int) {
 	if !s.active || len(s.filtered) == 0 {
 		return text, len(text)
 	}
-	chosen := s.items[s.filtered[s.cursor]]
-	// Build the replacement: the full command string including the "/".
+	chosen := s.filtered[s.cursor]
+	cmdStr := "/" + chosen.ID
 	before := text[:s.triggerCol]
 	after := text[s.triggerCol+1+len(s.query):]
-	newVal := before + chosen.command + " " + after
-	cursor := s.triggerCol + len(chosen.command) + 1
+	newVal := before + cmdStr + " " + after
+	cursor := s.triggerCol + len(cmdStr) + 1
 	s.active = false
 	return newVal, cursor
 }
@@ -138,40 +103,8 @@ func (s *slashMenu) moveCursor(delta int) {
 	}
 }
 
-// filter returns a scored list of indices into s.items matching
-// query. Uses the same token-based scoring as palette.refilter().
-func (s *slashMenu) filter(query string) []int {
-	if query == "" {
-		// Show all commands in definition order.
-		out := make([]int, len(s.items))
-		for i := range s.items {
-			out[i] = i
-		}
-		return out
-	}
-	q := strings.ToLower(strings.TrimSpace(query))
-	tokens := strings.Fields(q)
-	type scored struct {
-		idx   int
-		score int
-	}
-	var hits []scored
-	for i, it := range s.items {
-		hay := strings.ToLower(it.command + " " + it.description)
-		score, ok := scoreMatch(hay, tokens)
-		if ok {
-			hits = append(hits, scored{i, score})
-		}
-	}
-	sort.SliceStable(hits, func(a, b int) bool { return hits[a].score > hits[b].score })
-	out := make([]int, len(hits))
-	for i, h := range hits {
-		out[i] = h.idx
-	}
-	return out
-}
-
-// view renders the slash command autocomplete popup.
+// view renders the slash command autocomplete popup. Commands are
+// grouped by category for easier scanning.
 func (s *slashMenu) view(width, height int) string {
 	if !s.active {
 		return ""
@@ -183,32 +116,54 @@ func (s *slashMenu) view(width, height int) string {
 	if len(s.filtered) == 0 {
 		b.WriteString(paletteHintStyle.Render("  no matches"))
 	} else {
-		maxVisible := 10
-		if maxVisible > len(s.filtered) {
-			maxVisible = len(s.filtered)
-		}
-		for i := 0; i < maxVisible; i++ {
-			it := s.items[s.filtered[i]]
-			marker := "  "
-			style := paletteItemStyle
-			if i == s.cursor {
-				marker = "▶ "
-				style = paletteItemSelectedStyle
+		// Group filtered commands by category
+		groups := groupCommandsByCategory(s.filtered)
+		lineNum := 0
+		maxVisible := 12
+		for _, cat := range categoryOrder {
+			cmds, ok := groups[cat]
+			if !ok || len(cmds) == 0 {
+				continue
 			}
-			b.WriteString(marker)
-			b.WriteString(style.Render(it.command))
-			if it.description != "" {
-				b.WriteString("  ")
-				b.WriteString(paletteHintStyle.Render(it.description))
+			// Section header
+			if lineNum > 0 {
+				b.WriteString("\n")
 			}
+			b.WriteString(paletteHintStyle.Render("  " + categoryLabel(cat)))
 			b.WriteString("\n")
+			for _, cmd := range cmds {
+				if lineNum >= maxVisible {
+					break
+				}
+				marker := "  "
+				style := paletteItemStyle
+				if lineNum == s.cursor {
+					marker = "▶ "
+					style = paletteItemSelectedStyle
+				}
+				b.WriteString(marker)
+				b.WriteString(style.Render("/" + cmd.ID))
+				if cmd.Description != "" {
+					b.WriteString("  ")
+					b.WriteString(paletteHintStyle.Render(cmd.Description))
+				}
+				if cmd.Shortcut != "" {
+					b.WriteString(" ")
+					b.WriteString(paletteHintStyle.Render("[" + cmd.Shortcut + "]"))
+				}
+				b.WriteString("\n")
+				lineNum++
+			}
+			if lineNum >= maxVisible {
+				break
+			}
 		}
 		// Show argument hints for the selected command.
 		if s.cursor < len(s.filtered) {
-			sel := s.items[s.filtered[s.cursor]]
-			if sel.args != "" {
+			sel := s.filtered[s.cursor]
+			if sel.Args != "" {
 				b.WriteString("\n")
-				b.WriteString(paletteHintStyle.Render("  " + sel.command + " " + sel.args))
+				b.WriteString(paletteHintStyle.Render("  /" + sel.ID + " " + sel.Args))
 				b.WriteString("\n")
 			}
 		}
@@ -219,4 +174,13 @@ func (s *slashMenu) view(width, height int) string {
 
 	box := paletteBoxStyle.Width(min(72, width-4)).Render(b.String())
 	return lipgloss.Place(width, height, lipgloss.Left, lipgloss.Bottom, box)
+}
+
+// groupCommandsByCategory groups a slice of commands by their Category field.
+func groupCommandsByCategory(cmds []command) map[string][]command {
+	groups := make(map[string][]command)
+	for _, c := range cmds {
+		groups[c.Category] = append(groups[c.Category], c)
+	}
+	return groups
 }
