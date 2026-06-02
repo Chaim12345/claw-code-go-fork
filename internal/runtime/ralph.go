@@ -1,6 +1,11 @@
 package runtime
 
-import "os"
+import (
+	"bytes"
+	"fmt"
+	"os"
+	"text/template"
+)
 
 // RalphConfig configures a single Ralph loop run.
 type RalphConfig struct {
@@ -86,4 +91,32 @@ func readRalphSpec(path string) (string, error) {
 		return "", err
 	}
 	return string(b), nil
+}
+
+// RenderRalphPrompt executes the prompt template with the spec
+// body, current iteration, max iterations, and sentinel. Returns
+// an error if the template is invalid.
+func RenderRalphPrompt(cfg RalphConfig, specBody string, iteration, maxIter int) (string, error) {
+	tpl, err := template.New("ralph").Parse(cfg.PromptTemplate)
+	if err != nil {
+		return "", fmt.Errorf("parse template: %w", err)
+	}
+	data := struct {
+		Spec          string
+		SpecPath      string
+		Iteration     int
+		MaxIterations int
+		Sentinel      string
+	}{
+		Spec:          specBody,
+		SpecPath:      cfg.SpecPath,
+		Iteration:     iteration,
+		MaxIterations: maxIter,
+		Sentinel:      cfg.DoneSentinel,
+	}
+	var buf bytes.Buffer
+	if err := tpl.Execute(&buf, data); err != nil {
+		return "", fmt.Errorf("execute template: %w", err)
+	}
+	return buf.String(), nil
 }
