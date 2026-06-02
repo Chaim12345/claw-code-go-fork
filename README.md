@@ -148,6 +148,33 @@ Credentials are saved to `~/.claw-code/credentials/` and reused automatically on
 ./claw-code-go --session <session-id>
 ```
 
+### Ralph loop (autonomous spec runner)
+
+`claw ralph` runs a self-referential autonomous loop that reads a spec file
+(default: `ROADMAP.md`), implements one item per iteration, and updates the
+spec as work completes. Useful for overnight runs on a roadmap.
+
+```sh
+# Default: read ./ROADMAP.md, run up to 50 fresh-context iterations
+./claw-code-go ralph
+
+# Custom spec file, custom cap
+./claw-code-go ralph --spec ./SPEC.md --max-iterations 100
+```
+
+How it works:
+1. Each iteration starts with a fresh provider session (where supported).
+2. The model reads the spec, picks the next unchecked item, implements it,
+   marks it done in the spec, and commits.
+3. The model signals completion by emitting the literal sentinel
+   `RALPH_DONE` on its own line. The loop also exits automatically if every
+   checkbox in the spec is marked done.
+4. If the model hits a real blocker, it documents it under a `## Blockers`
+   heading at the bottom of the spec — the next iteration reads that note.
+
+The spec file is the only persistent state. Each iteration you will get a
+fresh agent context. Write everything important to the spec.
+
 ---
 
 ## CLI Flags
