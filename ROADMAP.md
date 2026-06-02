@@ -158,7 +158,7 @@ viewport with touch input, and gracefully scale up to desktop.
   - tablet (768-1024px): sidebar visible, content centered.
   - desktop (> 1024px): two-column (sidebar + main), max-width
     720px on the message column.
-- [ ] **Safe area insets**: `padding:
+- [x] **Safe area insets**: `padding:
   max(12px, env(safe-area-inset-top)) … max(12px,
   env(safe-area-inset-bottom))` on the composer. Add a CSS env
   test page (`/safe-area-test`) that draws the safe-area outlines

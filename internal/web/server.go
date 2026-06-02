@@ -135,6 +135,8 @@ func (s *Server) routes() http.Handler {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("ok"))
 	})
+	// Safe area insets visual test page for mobile development.
+	mux.HandleFunc("/safe-area-test", s.handleSafeAreaTest)
 	return s.rateLimiter.middleware(securityHeadersMiddleware(basicAuthMiddleware(mux)))
 }
 
@@ -144,6 +146,19 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	data, err := staticFS.ReadFile("static/index.html")
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	_, _ = w.Write(data)
+}
+
+// handleSafeAreaTest serves the visual safe-area insets test page
+// for mobile development and debugging on notched/rounded devices.
+func (s *Server) handleSafeAreaTest(w http.ResponseWriter, r *http.Request) {
+	data, err := staticFS.ReadFile("static/safe-area-test.html")
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
