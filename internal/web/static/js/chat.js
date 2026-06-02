@@ -1,7 +1,7 @@
 /**
  * claw-code-go chat UI — client-side JavaScript
  * Mobile-first, vanilla JS. Handles WebSocket connection,
- * message rendering, and virtual keyboard detection.
+ * message rendering, virtual keyboard, tool-call cards.
  */
 
 (function () {
@@ -21,8 +21,10 @@
   var reconnectTimer = null;
   var reconnectDelay = 1000;
   var MAX_RECONNECT_DELAY = 30000;
-  var currentBubble = null;   // current assistant bubble for deltas
-  var currentBubbleContent = ''; // accumulated markdown content
+  var currentBubble = null;
+  var currentBubbleContent = '';
+  var toolStartTime = null;     // timestamp when tool_start fired
+  var pendingToolCard = null;   // DOM element for current tool card
 
   // ── Visual Viewport (virtual keyboard) handling ───────────
   function handleViewportResize() {
@@ -102,26 +104,110 @@
     }
   }
 
-  /**
-   * Simple markdown-aware renderer: handles code blocks and
-   * inline code. Falls back to escaped HTML for everything else.
-   */
-  function renderMarkdown(text) {
-    // Protect against XSS by escaping HTML first
-    var escaped = escapeHtml(text);
+  // ── Tool-call cards ───────────────────────────────────────
+  function createToolCard(toolName, inputSummary) {
+    var card = document.createElement('div');
+    card.className = 'message message-tool';
 
-    // Replace code blocks: ```lang\n...\n```
+    var summary = document.createElement('div');
+    summary.className = 'tool-summary';
+
+    var icon = document.createElement('span');
+    icon.className = 'tool-icon';
+    icon.textContent = '\u2699'; // gear icon
+    summary.appendChild(icon);
+
+    var nameEl = document.createElement('strong');
+    nameEl.textContent = escapeHtml(toolName || 'tool');
+    summary.appendChild(nameEl);
+
+    if (inputSummary) {
+      var desc = document.createElement('span');
+      desc.className = 'tool-desc';
+      desc.textContent = ' — ' + escapeHtml(inputSummary);
+      summary.appendChild(desc);
+    }
+
+    var timer = document.createElement('span');
+    timer.className = 'tool-timer';
+    timer.textContent = '0.0s';
+    summary.appendChild(timer);
+
+    card.appendChild(summary);
+
+    // Collapsible details block
+    var details = document.createElement('details');
+    details.className = 'tool-details';
+    var dtSummary = document.createElement('summary');
+    dtSummary.textContent = 'result';
+    details.appendChild(dtSummary);
+
+    var pre = document.createElement('pre');
+    var code = document.createElement('code');
+    code.className = 'tool-output';
+    code.textContent = '';
+    pre.appendChild(code);
+    details.appendChild(pre);
+
+    // Copy button
+    var copyBtn = document.createElement('button');
+    copyBtn.className = 'tool-copy-btn';
+    copyBtn.textContent = 'Copy';
+    copyBtn.title = 'Copy output to clipboard';
+    copyBtn.addEventListener('click', function () {
+      navigator.clipboard.writeText(code.textContent).then(function () {
+        copyBtn.textContent = 'Copied!';
+        setTimeout(function () { copyBtn.textContent = 'Copy'; }, 2000);
+      }).catch(function () {
+        copyBtn.textContent = 'Error';
+      });
+    });
+    details.appendChild(copyBtn);
+
+    card.appendChild(details);
+    messagesEl.appendChild(card);
+
+    return { card: card, code: code, timer: timer };
+  }
+
+  function startToolCard(toolName, inputSummary) {
+    finalizeAssistantBubble();
+    toolStartTime = Date.now();
+    var result = createToolCard(toolName, inputSummary);
+    pendingToolCard = result;
+
+    // Update timer every 100ms
+    var updateTimer = function () {
+      if (pendingToolCard !== result) return;
+      var elapsed = ((Date.now() - toolStartTime) / 1000).toFixed(1);
+      result.timer.textContent = elapsed + 's';
+      if (pendingToolCard === result) {
+        requestAnimationFrame(function () {
+          setTimeout(updateTimer, 100);
+        });
+      }
+    };
+    updateTimer();
+  }
+
+  function finishToolCard(output) {
+    if (pendingToolCard) {
+      pendingToolCard.code.textContent = String(output || '').substring(0, 2000);
+      // Stop timer updates by clearing pendingToolCard
+      pendingToolCard = null;
+      toolStartTime = null;
+    }
+  }
+
+  // ── Markdown renderer ─────────────────────────────────────
+  function renderMarkdown(text) {
+    var escaped = escapeHtml(text);
     escaped = escaped.replace(/```(\w+)?\n([\s\S]*?)```/g, function (match, lang, code) {
       var langClass = lang ? ' class="language-' + lang + '"' : '';
       return '<pre><code' + langClass + '>' + code + '</code></pre>';
     });
-
-    // Replace inline code: `...`
     escaped = escaped.replace(/`([^`]+)`/g, '<code class="inline-code">$1</code>');
-
-    // Convert single newlines to <br> (preserving existing)
     escaped = escaped.replace(/\n/g, '<br>');
-
     return escaped;
   }
 
@@ -162,22 +248,16 @@
           case 'chat_session_init':
             break;
           case 'text_delta':
-            // Group consecutive deltas into one bubble
             appendDelta(msg.text || '');
             break;
           case 'text_final':
-            // Finalize the current bubble
             finalizeAssistantBubble();
             break;
           case 'tool_start':
-            finalizeAssistantBubble();
-            appendMessage('tool', '<strong>' + escapeHtml(msg.tool_name || 'tool') + '</strong>');
+            startToolCard(msg.tool_name, msg.input_summary || '');
             break;
           case 'tool_done':
-            if (msg.output) {
-              appendMessage('tool',
-                '<pre><code>' + escapeHtml(String(msg.output).substring(0, 2000)) + '</code></pre>');
-            }
+            finishToolCard(msg.output || '');
             break;
           case 'error':
             finalizeAssistantBubble();

@@ -167,14 +167,14 @@ viewport with touch input, and gracefully scale up to desktop.
   detect the keyboard and resize the composer / scroll-to-bottom on
   `resize` event. Add a test that mounts a mock visualViewport and
   asserts the composer height adjusts.
-- [ ] **Message rendering**: render server `text_delta` events into
+- [x] **Message rendering**: render server `text_delta` events into
   message bubbles with `aria-live="polite"` for screen readers.
   Group consecutive `text_delta`s from the same turn into one
   bubble. Use a `<pre><code>` for code blocks; the JS calls
   `Prism.highlight` (or a similar small syntax highlighter — add
   the dep) for the languages the agent is likely to emit (go,
   typescript, python, bash, json, html, css).
-- [ ] **Tool-call cards**: render `tool_start`/`tool_done` as
+- [x] **Tool-call cards**: render `tool_start`/`tool_done` as
   collapsible cards showing the tool name, a one-line summary of
   the input, and a `<details>` block with the result. Card has
   a small icon, a duration timer, and a copy button.
