@@ -83,6 +83,9 @@ func TestRateLimiter_AllowMessage(t *testing.T) {
 }
 
 func TestRateLimiter_DifferentIPs(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping in short mode")
+	}
 	t.Setenv("CLAW_WEB_RATE_RPM", "60")
 	rl := newRateLimiter()
 	if rl == nil {
