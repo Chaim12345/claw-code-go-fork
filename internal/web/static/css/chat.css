@@ -656,3 +656,73 @@ footer {
 .tool-copy-btn:hover {
   background: var(--color-border);
 }
+
+/* === iOS Install Banner === */
+#ios-install-banner {
+  position: fixed;
+  top: var(--topbar-height);
+  left: 0;
+  right: 0;
+  z-index: 500;
+  padding: var(--space-md) var(--space-lg);
+  background: var(--color-surface);
+  border-bottom: 1px solid var(--color-border);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  transition: transform 0.3s ease, opacity 0.3s ease;
+}
+
+.ios-banner-hidden {
+  transform: translateY(-100%);
+  opacity: 0;
+  pointer-events: none;
+}
+
+.ios-banner-visible {
+  transform: translateY(0);
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.ios-banner-content {
+  display: flex;
+  align-items: center;
+  gap: var(--space-md);
+}
+
+.ios-banner-dismiss {
+  background: none;
+  border: none;
+  font-size: 1.1rem;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  flex-shrink: 0;
+  -webkit-tap-highlight-color: transparent;
+}
+.ios-banner-dismiss:hover {
+  background: var(--color-border);
+}
+
+.ios-banner-icon {
+  color: var(--color-primary);
+  flex-shrink: 0;
+}
+
+.ios-banner-text {
+  font-size: var(--text-xs);
+  color: var(--color-text);
+  line-height: 1.4;
+  margin: 0;
+}
+
+.ios-banner-icon-inline {
+  display: inline-block;
+  vertical-align: middle;
+  color: var(--color-primary);
+  margin: 0 2px;
+}

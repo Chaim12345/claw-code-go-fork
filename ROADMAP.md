@@ -212,7 +212,7 @@ viewport with touch input, and gracefully scale up to desktop.
     - network-first for `/api/*` and `/ws`
     - offline fallback page that shows "you're offline; reconnect
       to continue" with a retry button
-- [ ] **iOS install hints**: `<meta name="apple-mobile-web-app-capable"
+- [x] **iOS install hints**: `<meta name="apple-mobile-web-app-capable"
   content="yes">`, `<meta name="apple-mobile-web-app-status-bar-style"
   content="black-translucent">`, and a one-time banner that shows
   the "Add to Home Screen" instructions for iOS Safari (which

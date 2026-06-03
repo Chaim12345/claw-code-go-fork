@@ -53,6 +53,52 @@
     </form>
   </footer>
 
+  <!-- iOS "Add to Home Screen" install banner -->
+  <div id="ios-install-banner" class="ios-banner-hidden" role="alert">
+    <div class="ios-banner-content">
+      <button id="ios-banner-dismiss" class="ios-banner-dismiss" aria-label="Dismiss install banner">✕</button>
+      <div class="ios-banner-icon">
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+          <rect x="2" y="2" width="9" height="9" rx="2" fill="currentColor"/>
+          <rect x="13" y="2" width="9" height="9" rx="2" fill="currentColor"/>
+          <rect x="2" y="13" width="9" height="9" rx="2" fill="currentColor"/>
+          <rect x="13" y="13" width="9" height="9" rx="2" fill="currentColor"/>
+        </svg>
+      </div>
+      <p class="ios-banner-text">
+        Install this app: tap <span class="ios-banner-icon-inline"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true"><rect x="4" y="3" width="16" height="18" rx="2" stroke="currentColor" stroke-width="2"/><path d="M8 12h8M12 8l4 4-4 4" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></span> Share then "Add to Home Screen"
+      </p>
+    </div>
+  </div>
+
+  <script>
+    // Show iOS install banner on iOS Safari (doesn't fire beforeinstallprompt).
+    (function () {
+      var isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
+      var isSafari = /^((?!chrome|android).)*safari/i.test(navigator.userAgent);
+      var isStandalone = window.matchMedia('(display-mode: standalone)').matches || navigator.standalone;
+
+      // Only show on iOS Safari when not already in standalone mode.
+      if (isIOS && isSafari && !isStandalone) {
+        var banner = document.getElementById('ios-install-banner');
+        var dismissed = localStorage.getItem('ios-install-banner-dismissed');
+        if (banner && !dismissed) {
+          banner.classList.remove('ios-banner-hidden');
+          banner.classList.add('ios-banner-visible');
+        }
+
+        var dismissBtn = document.getElementById('ios-banner-dismiss');
+        if (dismissBtn) {
+          dismissBtn.addEventListener('click', function () {
+            banner.classList.remove('ios-banner-visible');
+            banner.classList.add('ios-banner-hidden');
+            localStorage.setItem('ios-install-banner-dismissed', '1');
+          });
+        }
+      }
+    })();
+  </script>
+
   <script>
     // Register the service worker for PWA offline support.
     if ('serviceWorker' in navigator) {
