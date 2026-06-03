@@ -1,0 +1,28 @@
+{
+  "name": "claw-code-go-fork",
+  "version": "1.0.0",
+  "description": "<p align=\"center\">   <img src=\"assets/claw-code-go.png\" alt=\"claw-code-go\" width=\"360\" /> </p>",
+  "main": "index.js",
+  "directories": {
+    "doc": "docs"
+  },
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Chaim12345/claw-code-go-fork.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/Chaim12345/claw-code-go-fork/issues"
+  },
+  "homepage": "https://github.com/Chaim12345/claw-code-go-fork#readme",
+  "devDependencies": {
+    "eslint": "^10.4.1",
+    "html-validate": "^11.5.0"
+  }
+}

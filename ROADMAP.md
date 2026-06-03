@@ -280,7 +280,7 @@ viewport with touch input, and gracefully scale up to desktop.
   spins up a `httptest.Server`, opens a `websocket` connection,
   sends a `user_input`, asserts the expected sequence of
   `text_delta` and `text_final` events. Use a fake `api.APIClient`.
-- [ ] **HTML/CSS/JS lint**: add a `web/lint` Makefile target that
+- [x] **HTML/CSS/JS lint**: add a `web/lint` Makefile target that
   runs `html-validate` (or similar) and `eslint` on the chat assets.
   Wire it into `go test ./...` via a `TestWebAssets` Go test that
   shells out, or document it as a separate manual step.

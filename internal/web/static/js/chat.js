@@ -193,7 +193,6 @@
     pendingMessages[msgId] = { text: text, timestamp: Date.now() };
     ws.send(JSON.stringify(payload));
     appendMessage('user', escapeHtml(text));
-    lastUserMessage = text;
     // Clear previous follow-up chips when sending a new message.
     if (followupChipsEl) { followupChipsEl.remove(); followupChipsEl = null; }
     // Show thinking indicator after a delay (canceled when response arrives).
@@ -360,7 +359,6 @@
 
   // ── Suggested follow-up chips ────────────────────────────
   var followupChipsEl = null;
-  var lastUserMessage = '';
   var lastAssistantMessage = '';
 
   // Pattern-matched suggested follow-up questions.
@@ -974,7 +972,6 @@
   var sessionList    = document.getElementById('session-list');
   var newSessionBtn  = document.getElementById('new-session-btn');
   var currentSessionID = null;
-  var SESSIONS_STORAGE_KEY = 'claw_chat_sessions';
   var sessionMessages = {};    // sessionID → [messages HTML array]
   var CACHED_SESSION_COUNT = 50; // max cached session message lists
 

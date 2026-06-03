@@ -348,12 +348,30 @@ func runWebSubcommand(args []string) {
 		cancel()
 	}()
 
+	// If --provider was supplied, also wire up ChatLoopFactory so the
+	// chat WebSocket endpoint (/api/chat/ws) can handle messages.
+	var chatLoopFactory func() *runtime.ConversationLoop
+	if *provider != "" {
+		cfg := runtime.LoadConfig()
+		cfg.Autonomous = true
+		p, err := buildProvider(cfg)
+		if err == nil {
+			chatLoopFactory = func() *runtime.ConversationLoop {
+				return runtime.NewConversationLoop(cfg, p)
+			}
+			fmt.Fprintf(os.Stderr, "[web] chat mode enabled with provider %s\n", *provider)
+		} else {
+			fmt.Fprintf(os.Stderr, "[web] warning: could not build provider for chat mode: %v\n", err)
+		}
+	}
+
 	srv := web.NewServer(web.Config{
 		Addr:       *addr,
 		BinaryPath: exe,
 		Workdir:    *cwd,
 		Args:       tuiArgs,
 	})
+	srv.ChatLoopFactory = chatLoopFactory
 	if err := srv.ListenAndServe(ctx); err != nil {
 		fmt.Fprintf(os.Stderr, "[web] error: %v\n", err)
 		os.Exit(1)

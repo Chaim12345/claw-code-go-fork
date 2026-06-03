@@ -14,12 +14,12 @@
 </head>
 <body>
   <header id="top-bar">
-    <button id="sidebar-toggle" aria-label="Toggle sidebar" title="Toggle sidebar">☰</button>
+    <button type="button" id="sidebar-toggle" aria-label="Toggle sidebar" title="Toggle sidebar">☰</button>
     <h1>claw-code-go</h1>
     <span id="connection-status" class="status-pill status-connected">connected</span>
-    <button id="theme-toggle" aria-label="Switch theme" title="Switch theme (system/light/dark)">◐</button>
-    <button id="font-size-toggle" aria-label="Change font size" title="Font size (S/M/L)">A</button>
-    <button id="shortcuts-toggle" aria-label="Keyboard shortcuts" title="Keyboard shortcuts (?)">?</button>
+    <button type="button" id="theme-toggle" aria-label="Switch theme" title="Switch theme (system/light/dark)">◐</button>
+    <button type="button" id="font-size-toggle" aria-label="Change font size" title="Font size (S/M/L)">A</button>
+    <button type="button" id="shortcuts-toggle" aria-label="Keyboard shortcuts" title="Keyboard shortcuts (?)">?</button>
   </header>
 
   <!-- Rate-limit banner (shown when model responds with rate_limit error) -->
@@ -35,7 +35,7 @@
         <ul id="session-list">
           <li class="session-item active">Current session</li>
         </ul>
-        <button id="new-session-btn" aria-label="Start a new chat session">+ New session</button>
+        <button type="button" id="new-session-btn" aria-label="Start a new chat session">+ New session</button>
       </nav>
     </aside>
 
@@ -73,7 +73,7 @@
   <!-- iOS "Add to Home Screen" install banner -->
   <div id="ios-install-banner" class="ios-banner-hidden" role="alert">
     <div class="ios-banner-content">
-      <button id="ios-banner-dismiss" class="ios-banner-dismiss" aria-label="Dismiss install banner">✕</button>
+      <button type="button" id="ios-banner-dismiss" class="ios-banner-dismiss" aria-label="Dismiss install banner">✕</button>
       <div class="ios-banner-icon">
         <svg width="24" height="24" viewBox="0 0 24 24" fill="none" aria-hidden="true">
           <rect x="2" y="2" width="9" height="9" rx="2" fill="currentColor"/>
@@ -129,12 +129,12 @@
     }
   </script>
   <!-- Keyboard shortcuts overlay -->
-  <div id="shortcuts-overlay" class="shortcuts-overlay-hidden" role="dialog" aria-label="Keyboard shortcuts" aria-hidden="true">
+  <div id="shortcuts-overlay" class="shortcuts-overlay-hidden" role="dialog" aria-label="Keyboard shortcuts">
     <div class="shortcuts-backdrop"></div>
     <div class="shortcuts-card">
       <div class="shortcuts-header">
         <h2>Keyboard Shortcuts</h2>
-        <button id="shortcuts-close" class="shortcuts-close-btn" aria-label="Close shortcuts">&times;</button>
+        <button type="button" id="shortcuts-close" class="shortcuts-close-btn" aria-label="Close shortcuts">&times;</button>
       </div>
       <div class="shortcuts-body">
         <table class="shortcuts-table">

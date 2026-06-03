@@ -10,7 +10,6 @@
  */
 
 const CACHE_NAME = 'claw-code-v1';
-const OFFLINE_URL = '/offline.html'; // inline-generated below
 
 // Assets to pre-cache on install.
 const PRECACHE_URLS = [
