@@ -53,6 +53,18 @@
     </form>
   </footer>
 
+  <script>
+    // Register the service worker for PWA offline support.
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.register('/static/sw.js', { scope: '/' })
+        .then(function (reg) {
+          console.log('[sw] registered, scope:', reg.scope);
+        })
+        .catch(function (err) {
+          console.warn('[sw] registration failed:', err);
+        });
+    }
+  </script>
   <script src="/static/js/chat.js"></script>
 </body>
 </html>
