@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -135,7 +136,8 @@ func TestRalphLoop_StopsAtMax(t *testing.T) {
 	called := 0
 	iterFn := func(ctx context.Context, iteration, maxIter int) (RalphVerdictKind, string, error) {
 		called++
-		return RalphVerdictContinue, "x", nil
+		// Return unique text each iteration to avoid stupid-loop detection.
+		return RalphVerdictContinue, fmt.Sprintf("iter-%d", iteration), nil
 	}
 	cfg := DefaultRalphConfig()
 	cfg.MaxIterations = 5

@@ -2,10 +2,16 @@ package web
 
 import (
 	"net/http"
+	"sync"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
+)
+
+var (
+	metricsOnce sync.Once
+	m           *Metrics
 )
 
 // Metrics holds all Prometheus metrics for the web server.
@@ -32,49 +38,50 @@ type Metrics struct {
 }
 
 // NewMetrics creates and registers all Prometheus metrics with the
-// default registry. Call this once during server startup.
+// default registry. Safe to call multiple times (uses sync.Once).
 func NewMetrics() *Metrics {
-	m := &Metrics{
-		SessionsTotal: prometheus.NewCounterVec(prometheus.CounterOpts{
-			Namespace: "claw_web",
-			Name:      "sessions_total",
-			Help:      "Total number of chat sessions created.",
-		}, []string{"provider", "model"}),
+	metricsOnce.Do(func() {
+		m = &Metrics{
+			SessionsTotal: prometheus.NewCounterVec(prometheus.CounterOpts{
+				Namespace: "claw_web",
+				Name:      "sessions_total",
+				Help:      "Total number of chat sessions created.",
+			}, []string{"provider", "model"}),
 
-		ActiveSessions: prometheus.NewGauge(prometheus.GaugeOpts{
-			Namespace: "claw_web",
-			Name:      "active_sessions",
-			Help:      "Current number of active chat sessions.",
-		}),
+			ActiveSessions: prometheus.NewGauge(prometheus.GaugeOpts{
+				Namespace: "claw_web",
+				Name:      "active_sessions",
+				Help:      "Current number of active chat sessions.",
+			}),
 
-		MessagesTotal: prometheus.NewCounterVec(prometheus.CounterOpts{
-			Namespace: "claw_web",
-			Name:      "messages_total",
-			Help:      "Total number of messages processed.",
-		}, []string{"role", "kind"}),
+			MessagesTotal: prometheus.NewCounterVec(prometheus.CounterOpts{
+				Namespace: "claw_web",
+				Name:      "messages_total",
+				Help:      "Total number of messages processed.",
+			}, []string{"role", "kind"}),
 
-		RequestDurationSeconds: prometheus.NewHistogramVec(prometheus.HistogramOpts{
-			Namespace: "claw_web",
-			Name:      "request_duration_seconds",
-			Help:      "HTTP request duration in seconds (excluding WebSocket connections).",
-			Buckets:   []float64{0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10},
-		}, []string{"method", "path"}),
+			RequestDurationSeconds: prometheus.NewHistogramVec(prometheus.HistogramOpts{
+				Namespace: "claw_web",
+				Name:      "request_duration_seconds",
+				Help:      "HTTP request duration in seconds (excluding WebSocket connections).",
+				Buckets:   []float64{0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10},
+			}, []string{"method", "path"}),
 
-		ErrorsTotal: prometheus.NewCounterVec(prometheus.CounterOpts{
-			Namespace: "claw_web",
-			Name:      "errors_total",
-			Help:      "Total number of errors by kind.",
-		}, []string{"kind"}),
-	}
+			ErrorsTotal: prometheus.NewCounterVec(prometheus.CounterOpts{
+				Namespace: "claw_web",
+				Name:      "errors_total",
+				Help:      "Total number of errors by kind.",
+			}, []string{"kind"}),
+		}
 
-	prometheus.MustRegister(
-		m.SessionsTotal,
-		m.ActiveSessions,
-		m.MessagesTotal,
-		m.RequestDurationSeconds,
-		m.ErrorsTotal,
-	)
-
+		prometheus.MustRegister(
+			m.SessionsTotal,
+			m.ActiveSessions,
+			m.MessagesTotal,
+			m.RequestDurationSeconds,
+			m.ErrorsTotal,
+		)
+	})
 	return m
 }
 
