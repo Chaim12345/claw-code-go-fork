@@ -1,0 +1,12 @@
+# Baselines directory for visual regression screenshots.
+
+# To regenerate baselines:
+#   1. Start the server: ./claw-code-go web --addr 127.0.0.1:7777
+#   2. Remove old baselines: rm -f web/e2e/baselines/*.png
+#   3. Run: npx playwright test web/e2e/mobile.spec.ts
+#   4. The first run will fail, saving new baselines to this directory.
+#   5. Visually review each .png in this directory.
+#   6. Run again: npx playwright test web/e2e/mobile.spec.ts
+#   7. This time the tests should pass against the new baselines.
+#
+# Baselines must be committed to git after verification.

@@ -284,7 +284,7 @@ viewport with touch input, and gracefully scale up to desktop.
   runs `html-validate` (or similar) and `eslint` on the chat assets.
   Wire it into `go test ./...` via a `TestWebAssets` Go test that
   shells out, or document it as a separate manual step.
-- [ ] **Mobile visual regression**: a Playwright script
+- [x] **Mobile visual regression**: a Playwright script
   (`web/e2e/mobile.spec.ts`) that opens the chat UI in a 390x844
   viewport (iPhone 14 size), sends a message, screenshots the
   result, and diffs against `web/e2e/baselines/`. Document how to

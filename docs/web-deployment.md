@@ -338,6 +338,64 @@ banner that guides users through this flow.
 
 ---
 
+## Mobile visual regression tests (Playwright)
+
+The project includes Playwright-based visual regression tests that
+capture screenshots of the chat UI at iPhone 14 viewport size (390×844)
+and compare them against stored baselines. This catches unintended CSS
+layout regressions.
+
+### Prerequisites
+
+```bash
+npm ci                          # install deps including @playwright/test
+npx playwright install chromium # install Chromium browser
+./claw-code-go web --addr 127.0.0.1:7777  # start the server
+```
+
+### Running the tests
+
+```bash
+# Run against a running server
+make web/e2e
+
+# Or override the server URL
+E2E_BASE_URL=http://192.168.1.50:7777 make web/e2e
+```
+
+### Regenerating baselines
+
+When the UI changes intentionally (e.g. new features, CSS redesign),
+baselines must be regenerated:
+
+```bash
+# Automated: remove old baselines, run tests (first run saves new baselines)
+make web/e2e-update
+
+# Manual steps:
+# 1. Start the server: ./claw-code-go web --addr 127.0.0.1:7777
+# 2. Remove old baselines: rm -f web/e2e/baselines/*.png
+# 3. Run: npx playwright test --config web/e2e/playwright.config.ts web/e2e/mobile.spec.ts
+#    (First run will fail, saving new baselines to web/e2e/baselines/)
+# 4. Visually review each .png in web/e2e/baselines/
+# 5. Run again: npx playwright test --config web/e2e/playwright.config.ts web/e2e/mobile.spec.ts
+#    (Second run should pass against the new baselines)
+# 6. Commit the new baselines: git add web/e2e/baselines/ && git commit -m "web: update visual baselines"
+```
+
+### Test coverage
+
+The visual regression suite covers:
+- Empty state (no messages, placeholder visible)
+- Composer with text input
+- Sidebar toggle (mobile hamburger menu)
+- Dark mode rendering
+- Keyboard shortcuts overlay
+- Offline banner on network disconnect
+- Sticky composer with scrolled messages
+
+---
+
 ## Related documents
 
 - [Web protocol reference](./web-protocol.md) — structured chat API
