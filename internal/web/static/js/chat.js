@@ -193,6 +193,9 @@
     pendingMessages[msgId] = { text: text, timestamp: Date.now() };
     ws.send(JSON.stringify(payload));
     appendMessage('user', escapeHtml(text));
+    lastUserMessage = text;
+    // Clear previous follow-up chips when sending a new message.
+    if (followupChipsEl) { followupChipsEl.remove(); followupChipsEl = null; }
     // Show thinking indicator after a delay (canceled when response arrives).
     showThinkingIndicator();
     composerInput.value = '';
@@ -353,6 +356,120 @@
       thinkingEl.remove();
       thinkingEl = null;
     }
+  }
+
+  // ── Suggested follow-up chips ────────────────────────────
+  var followupChipsEl = null;
+  var lastUserMessage = '';
+  var lastAssistantMessage = '';
+
+  // Pattern-matched suggested follow-up questions.
+  // When the assistant mentions specific topics, we generate contextual chips.
+  function generateFollowups(assistantText) {
+    if (!assistantText || assistantText.length < 20) return [];
+    var suggestions = [];
+    var lower = assistantText.toLowerCase();
+
+    // Code-related follow-ups.
+    if (lower.indexOf('error') !== -1 || lower.indexOf('bug') !== -1 || lower.indexOf('fix') !== -1) {
+      suggestions.push('Show me how to fix this');
+      suggestions.push('What caused this error?');
+    }
+    if (lower.indexOf('function') !== -1 || lower.indexOf('func ') !== -1 || lower.indexOf('method') !== -1) {
+      suggestions.push('Can you add error handling?');
+      suggestions.push('Write tests for this');
+    }
+    if (lower.indexOf('test') !== -1) {
+      suggestions.push('Add more edge cases');
+      suggestions.push('Show me a passing example');
+    }
+    if (lower.indexOf('```') !== -1 || lower.indexOf('code') !== -1) {
+      suggestions.push('Explain this code line by line');
+      suggestions.push('Can you simplify this?');
+    }
+    if (lower.indexOf('performance') !== -1 || lower.indexOf('slow') !== -1 || lower.indexOf('optimize') !== -1) {
+      suggestions.push('Show me a benchmark');
+      suggestions.push('Any other optimizations?');
+    }
+
+    // General follow-ups.
+    if (lower.indexOf('api') !== -1 || lower.indexOf('endpoint') !== -1 || lower.indexOf('rest') !== -1) {
+      suggestions.push('Show me the full API spec');
+      suggestions.push('How do I add authentication?');
+    }
+    if (lower.indexOf('database') !== -1 || lower.indexOf('sql') !== -1 || lower.indexOf('query') !== -1) {
+      suggestions.push('Show me the migration script');
+      suggestions.push('How to index this for performance?');
+    }
+    if (lower.indexOf('config') !== -1 || lower.indexOf('env') !== -1 || lower.indexOf('setting') !== -1) {
+      suggestions.push('Show me all config options');
+      suggestions.push('Add a default value');
+    }
+    if (lower.indexOf('security') !== -1 || lower.indexOf('vulnerab') !== -1) {
+      suggestions.push('How to prevent this permanently?');
+      suggestions.push('Check for similar issues');
+    }
+
+    // Always provide some generic chips as fallback.
+    if (suggestions.length < 2) {
+      suggestions.push('Can you elaborate?');
+      suggestions.push('Show me a complete example');
+      suggestions.push('How does this work under the hood?');
+    }
+
+    // Deduplicate and limit.
+    var seen = {};
+    var result = [];
+    for (var i = 0; i < suggestions.length; i++) {
+      if (!seen[suggestions[i]]) {
+        seen[suggestions[i]] = true;
+        result.push(suggestions[i]);
+      }
+      if (result.length >= 5) break;
+    }
+    return result;
+  }
+
+  function renderFollowupChips(suggestions) {
+    // Remove any existing follow-up chips.
+    if (followupChipsEl) {
+      followupChipsEl.remove();
+      followupChipsEl = null;
+    }
+    if (!suggestions || !suggestions.length) return;
+
+    followupChipsEl = document.createElement('div');
+    followupChipsEl.className = 'followup-chips';
+    followupChipsEl.setAttribute('aria-label', 'Suggested follow-up questions');
+
+    for (var i = 0; i < suggestions.length; i++) {
+      (function (text) {
+        var chip = document.createElement('button');
+        chip.className = 'followup-chip';
+        chip.textContent = text;
+        chip.setAttribute('aria-label', text);
+        chip.addEventListener('click', function () {
+          // Populate the composer and focus so the user can edit or send.
+          composerInput.value = text;
+          autoGrowTextarea();
+          updateCharCount();
+          sendButton.disabled = false;
+          composerInput.focus();
+          scrollToBottom();
+        });
+        followupChipsEl.appendChild(chip);
+      })(suggestions[i]);
+    }
+
+    messagesEl.appendChild(followupChipsEl);
+    hideEmptyState();
+    scrollToBottom();
+  }
+
+  function showFollowups() {
+    if (!lastAssistantMessage) return;
+    var suggestions = generateFollowups(lastAssistantMessage);
+    renderFollowupChips(suggestions);
   }
 
   // ── Tool-call cards ──────────────────────────────────────
@@ -811,8 +928,8 @@
               setTimeout(function () { delete ackedMessages[msg.message_id]; }, 60000);
             }
             break;
-          case 'text_delta':  appendDelta(msg.text || ''); break;
-          case 'text_final':  finalizeAssistantBubble(); break;
+          case 'text_delta':  appendDelta(msg.text || ''); lastAssistantMessage = currentBubbleContent; break;
+          case 'text_final':  lastAssistantMessage = currentBubbleContent || lastAssistantMessage; finalizeAssistantBubble(); break;
           case 'tool_start':  startToolCard(msg.tool_name, msg.input_summary || ''); break;
           case 'tool_done':   finishToolCard(msg.output || ''); break;
           case 'permission_ask': showPermissionDialog(msg); break;
@@ -824,7 +941,7 @@
               appendMessage('error', 'Error: ' + escapeHtml(msg.message || msg.error || 'unknown'));
             }
             break;
-          case 'done': finalizeAssistantBubble(); break;
+          case 'done': finalizeAssistantBubble(); showFollowups(); break;
           default: break;
         }
       } catch (err) { /* ignore non-JSON */ }
@@ -959,6 +1076,8 @@
     pendingMessages = {};
     ackedMessages = {};
     currentSessionID = null;
+    lastAssistantMessage = '';
+    followupChipsEl = null;
     removeThinkingIndicator();
     hideRateLimitBanner();
     showEmptyState();

@@ -300,7 +300,7 @@ cover but the research showed are important.
 
 ### Phase 3 additions — Mobile chat UI
 
-- [ ] **Suggested follow-up chips**: after each AI response, render
+- [x] **Suggested follow-up chips**: after each AI response, render
   tappable chip buttons with suggested follow-up questions (Perplexity
   pattern). Reduces typing friction on mobile. Implement in
   `chat.html` JS.
