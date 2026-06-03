@@ -203,6 +203,141 @@ curl -f http://localhost:7777/healthz
 
 ---
 
+## PWA install verification
+
+The chat UI is a Progressive Web App (PWA) that can be installed to
+the home screen on desktop Chrome, Android Chrome, and iOS Safari
+(using the "Add to Home Screen" flow). This section documents how to
+verify that the install flow works on each platform.
+
+### Prerequisites for installability
+
+For the browser to offer the install prompt, all of these must be
+true:
+
+1. **HTTPS** — the site must be served over TLS (or `localhost` for
+   development). The easiest path is running Caddy in front of the
+   app (see the Caddy section above). Let's Encrypt auto-provisions
+   a certificate.
+2. **Valid manifest** — the server must serve
+   `/static/manifest.webmanifest` with `Content-Type:
+   application/manifest+json`. The manifest must include `name` (or
+   `short_name`), `start_url`, `icons` with at least a 192×192 and a
+   512×512 PNG, and `display: standalone`.
+3. **Registered service worker** — `/static/sw.js` must register
+   successfully with a `fetch` handler. Open DevTools → Application →
+   Service Workers to confirm it shows "activated and is running".
+4. **User engagement** — on desktop Chrome, the browser also requires
+   some user interaction (click, scroll, keystroke) before showing
+   the install prompt. On Android Chrome this heuristic is relaxed.
+
+### Verifying the checklist programmatically
+
+Open Chrome DevTools → Application → Manifest. The "Installability"
+section shows a green checkmark for each criterion. If any criterion
+fails, the section explains why (e.g. "No matching service worker
+detected").
+
+Alternatively, run a Lighthouse audit (DevTools → Lighthouse →
+Progressive Web App) and check the "Installable" group. All items in
+that group must pass.
+
+### Desktop Chrome install flow
+
+1. Open the chat UI at `https://chat.example.com` in Chrome.
+2. Open DevTools → Application → Manifest. Verify all installability
+   checks pass (green checkmarks).
+3. Look for the install icon (a monitor with a down-arrow) in the
+   address bar, on the right side. If it doesn't appear immediately,
+   interact with the page (click a message, type in the composer).
+4. Click the install icon. Chrome shows a dialog: "Install app?"
+   with the app name and icon. Click **Install**.
+5. The app opens in a standalone window (no browser chrome, no
+   address bar). Verify:
+   - The window title bar shows "claw-code-go".
+   - Resizing the window reflows the chat layout correctly.
+   - The `/terminal` page works inside the PWA window (navigate by
+     typing the URL, or add a link in the sidebar).
+   - The service worker is active (DevTools → Application → Service
+     Workers).
+6. **Uninstall**: click the three-dot menu in the PWA title bar →
+   "Uninstall claw-code-go…". This removes the app from
+   `chrome://apps`.
+
+### Android Chrome install flow
+
+1. Open the chat UI at `https://chat.example.com` in Chrome on an
+   Android device (tested on Android 12+ with Chrome 110+).
+2. Chrome automatically shows a bottom-sheet install prompt after
+   the first page load if all PWA criteria are met. The sheet says
+   "Add claw-code-go to Home screen".
+3. If the automatic prompt doesn't appear (or was dismissed), tap
+   the three-dot menu → "Add to Home screen".
+4. In the dialog that appears:
+   - The app name is shown as "claw-code-go" (from `short_name` in
+     the manifest).
+   - The icon is the 192×192 maskable PNG from the manifest.
+   - Tap **Add**. On some Android launchers you can also drag to
+     place the icon manually.
+5. After adding, tap the claw-code-go icon on the home screen. The
+   app opens in **standalone** mode (full screen, no browser
+   chrome). Verify:
+   - The status bar color matches the manifest `theme_color`
+     (`#1a1a2e`).
+   - The splash screen background matches `background_color`.
+   - The chat UI fills the screen edge-to-edge.
+   - The soft keyboard works correctly with the composer
+     (visualViewport handling).
+   - Switch to airplane mode → the offline fallback page appears
+     with a "Retry" button. Switch back online → tap Retry → chat
+     reloads.
+   - The Android back button (gesture or hardware) closes the PWA
+     and returns to the home screen (does not navigate back in
+     browser history).
+6. **Uninstall**: long-press the home screen icon → "Uninstall", or
+   go to Settings → Apps → claw-code-go → Uninstall.
+
+### iOS Safari "Add to Home Screen" flow
+
+iOS Safari does not support the `beforeinstallprompt` event or
+automatic PWA install. Instead, users must manually add the app via
+the Share menu. The chat UI includes an iOS-specific instruction
+banner that guides users through this flow.
+
+1. Open the chat UI at `https://chat.example.com` in Safari on an
+   iPhone or iPad (iOS 15+).
+2. The iOS install banner appears at the top of the page (one-time;
+   dismissed banner is stored in `localStorage` and won't reappear).
+3. Tap the **Share** icon (square with an up-arrow) in the Safari
+   toolbar.
+4. Scroll down and tap **"Add to Home Screen"**.
+5. The dialog shows the app name ("claw-code-go") and the
+   apple-touch-icon (180×180). Tap **Add**.
+6. The icon appears on the iOS home screen. Tap it to open. Verify:
+   - The app opens in standalone mode (no Safari toolbar or tab bar).
+   - The status bar is black-translucent (matches the
+     `apple-mobile-web-app-status-bar-style` meta tag).
+   - Safe area insets work (content doesn't overlap the notch or
+     home indicator).
+   - The soft keyboard pushes the composer up correctly.
+   - Multitasking (swipe up from the bottom or double-click home)
+     shows the app as a separate card from Safari.
+7. **Uninstall**: long-press the home screen icon → "Remove App" →
+   "Delete App".
+
+### Common PWA install issues and fixes
+
+| Symptom | Likely cause | Fix |
+|---|---|---|
+| No install icon in Chrome address bar | Manifest not served with correct `Content-Type` | Ensure the Go server sets `Content-Type: application/manifest+json` for `.webmanifest` files |
+| Manifest "Installability" shows a red X for icons | Icon files missing or wrong size | Verify `/static/icons/icon-192.png` and `icon-512.png` exist and are valid PNGs of the declared sizes |
+| Service worker doesn't activate | SW script has a syntax error | Check DevTools → Application → Service Workers for error messages; test `sw.js` in isolation |
+| Android install prompt doesn't appear | Site not served over HTTPS | Deploy behind Caddy/nginx with TLS; `localhost` works for dev but not on a real device |
+| iOS standalone mode shows Safari chrome | Missing `apple-mobile-web-app-capable` meta | Verify `<meta name="apple-mobile-web-app-capable" content="yes">` is in `<head>` |
+| PWA opens as browser tab instead of standalone | `display` in manifest is not `standalone` | Check manifest: must have `"display": "standalone"` |
+
+---
+
 ## Related documents
 
 - [Web protocol reference](./web-protocol.md) — structured chat API

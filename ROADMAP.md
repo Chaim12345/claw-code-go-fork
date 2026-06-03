@@ -217,7 +217,7 @@ viewport with touch input, and gracefully scale up to desktop.
   content="black-translucent">`, and a one-time banner that shows
   the "Add to Home Screen" instructions for iOS Safari (which
   doesn't fire `beforeinstallprompt`).
-- [ ] **Verify install on desktop Chrome and on Android**: document
+- [x] **Verify install on desktop Chrome and on Android**: document
   the install flow in `docs/web-deployment.md`.
 
 ---
