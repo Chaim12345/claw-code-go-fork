@@ -117,6 +117,9 @@ func TestTurnEventToOutbound(t *testing.T) {
 // and verifies the server sends chat_session_init followed by
 // text_delta / text_final / done messages.
 func TestChatSessionRoundTrip(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test in short mode")
+	}
 	// A fake that emits one text block then end_turn.
 	fc := &fakeClient{
 		events: []api.StreamEvent{
@@ -228,6 +231,9 @@ func TestChatSessionRoundTrip(t *testing.T) {
 
 // TestChatSession_ParseError sends invalid JSON and expects a parse_error.
 func TestChatSession_ParseError(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test in short mode")
+	}
 	cfg := &runtime.Config{
 		Model:            "expert",
 		MaxTokens:        100,
@@ -276,6 +282,9 @@ func TestChatSession_ParseError(t *testing.T) {
 // TestChatSession_EmptyUserInput sends a user_input with empty text
 // and expects a validation error.
 func TestChatSession_EmptyUserInput(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test in short mode")
+	}
 	cfg := &runtime.Config{
 		Model:            "expert",
 		MaxTokens:        100,
@@ -326,6 +335,9 @@ func TestChatSession_EmptyUserInput(t *testing.T) {
 // decodes a permission_reply message and responds (currently with a
 // "not yet supported" warn since PermReply channels aren't wired).
 func TestChatSession_PermissionReplyDecode(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test in short mode")
+	}
 	cfg := &runtime.Config{
 		Model:            "expert",
 		MaxTokens:        100,
@@ -377,6 +389,9 @@ func TestChatSession_PermissionReplyDecode(t *testing.T) {
 // TestChatSessionHandleChatWS_NoFactory verifies that /api/chat/ws
 // returns 501 when ChatLoopFactory is nil.
 func TestChatSessionHandleChatWS_NoFactory(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test in short mode")
+	}
 	srv := NewServer(Config{Addr: "127.0.0.1:0"})
 	ts := httptest.NewServer(srv.routes())
 	defer ts.Close()
@@ -394,6 +409,9 @@ func TestChatSessionHandleChatWS_NoFactory(t *testing.T) {
 // TestChatSession_UnknownMessageType verifies that an unknown
 // message type produces a warning.
 func TestChatSession_UnknownMessageType(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test in short mode")
+	}
 	cfg := &runtime.Config{
 		Model:            "expert",
 		MaxTokens:        100,
@@ -459,6 +477,9 @@ func TestSendJSON_EmptyType(t *testing.T) {
 // runChatSession prevents data races when the TurnEvent translator
 // and the client-reader loop both write to the connection.
 func TestChatSession_ConcurrentWrites(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test in short mode")
+	}
 	// This test exercises the mutex path by sending a user_input while
 	// events are being written. The race detector (-race flag) would
 	// catch any unprotected concurrent websocket writes.

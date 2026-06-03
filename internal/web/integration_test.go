@@ -19,6 +19,9 @@ import (
 // connection, sends a user_input, and asserts the expected sequence of
 // text_delta, text_final, and done events using a fake api.APIClient.
 func TestIntegration_ChatRoundTrip(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test in short mode")
+	}
 	fc := &fakeClient{
 		events: []api.StreamEvent{
 			{Type: api.EventMessageStart, InputTokens: 5},
@@ -140,6 +143,9 @@ func TestIntegration_ChatRoundTrip(t *testing.T) {
 // TestIntegration_SessionIsolation verifies that two concurrent WebSocket
 // connections get separate session IDs and can both complete a turn.
 func TestIntegration_SessionIsolation(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test in short mode")
+	}
 	cfg := &runtime.Config{
 		Model:            "expert",
 		MaxTokens:        100,
@@ -224,6 +230,9 @@ func TestIntegration_SessionIsolation(t *testing.T) {
 // TestIntegration_Timeout verifies that the server respects context
 // cancellation and cleans up cleanly when the client disconnects mid-turn.
 func TestIntegration_Timeout(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test in short mode")
+	}
 	cfg := &runtime.Config{
 		Model:            "expert",
 		MaxTokens:        100,
@@ -280,6 +289,9 @@ func TestIntegration_Timeout(t *testing.T) {
 // TestIntegration_ErrorHandling verifies the server handles API errors
 // gracefully and sends an error event to the client.
 func TestIntegration_ErrorHandling(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test in short mode")
+	}
 	cfg := &runtime.Config{
 		Model:            "expert",
 		MaxTokens:        100,
