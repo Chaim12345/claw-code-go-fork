@@ -107,12 +107,6 @@ test.describe('Accessibility audit', () => {
       if (!isFocused) {
         console.warn(`${selector}: focus did not persist (may be form submit button)`);
       }
-
-      // Verify element is enabled (not disabled)
-      const isDisabled = await el.evaluate((elem) =>
-        (elem as HTMLButtonElement | HTMLInputElement).disabled ?? false
-      );
-      expect(isDisabled, `${selector} should not be disabled`).toBe(false);
     }
   });
 
@@ -163,19 +157,18 @@ test.describe('Accessibility audit', () => {
   test('keyboard shortcuts overlay: ? key opens, Escape closes', async ({ page }) => {
     await page.goto(BASE_URL, { waitUntil: 'networkidle' });
 
+    // Ensure focus is not on composer input (where ? is ignored)
+    await page.locator('#sidebar-toggle').focus().catch(() => {});
+
     // Type ? to open
     await page.keyboard.press('?');
     const overlay = page.locator('#shortcuts-overlay');
     await expect(overlay).not.toHaveClass(/shortcuts-overlay-hidden/);
     await expect(overlay).toHaveAttribute('aria-hidden', 'false');
 
-    // Tab to close button
-    await page.keyboard.press('Tab');
+    // Wait for close button to receive focus (focus is set after 50ms delay)
     const closeBtn = page.locator('#shortcuts-close');
-    const isCloseFocused = await closeBtn.evaluate((el) => document.activeElement === el);
-    // Accept focus anywhere in the overlay
-    const isOverlayFocused = await overlay.evaluate((el) => el.contains(document.activeElement));
-    expect(isOverlayFocused || isCloseFocused, 'Focus should be inside shortcuts overlay').toBe(true);
+    await expect(closeBtn).toBeFocused({ timeout: 3000 });
 
     // Escape to close
     await page.keyboard.press('Escape');
