@@ -22,6 +22,12 @@
     <button type="button" id="shortcuts-toggle" aria-label="Keyboard shortcuts" title="Keyboard shortcuts (?)">?</button>
   </header>
 
+  <!-- Offline banner (shown when network connectivity is lost) -->
+  <div id="offline-banner" class="offline-banner" role="alert" aria-hidden="true">
+    <span class="offline-banner-icon" aria-hidden="true">📡</span>
+    <span class="offline-banner-text">You're offline. Waiting for connection…</span>
+  </div>
+
   <!-- Rate-limit banner (shown when model responds with rate_limit error) -->
   <div id="rate-limit-banner" class="rate-limit-banner" role="alert">
     <span class="rate-limit-icon" aria-hidden="true">⚠️</span>

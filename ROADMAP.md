@@ -312,7 +312,7 @@ cover but the research showed are important.
 
 ### Phase 4 additions — PWA & offline
 
-- [ ] **Network status detection**: add `navigator.onLine` +
+- [x] **Network status detection**: add `navigator.onLine` +
   `online`/`offline` event listeners to show a persistent offline
   banner when connectivity is lost. Gating logic: always confirm with
   an actual fetch/WS failure, since `navigator.onLine` has false

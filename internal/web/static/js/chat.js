@@ -849,6 +849,74 @@
     });
   }
 
+  // ── Network status detection ─────────────────────────
+  var offlineBanner = document.getElementById('offline-banner');
+  var networkConfirmedOnline = true; // assume online until proven otherwise
+  var networkCheckTimer = null;
+
+  function showOfflineBanner() {
+    if (!offlineBanner) return;
+    networkConfirmedOnline = false;
+    offlineBanner.classList.add('offline-visible');
+    offlineBanner.setAttribute('aria-hidden', 'false');
+  }
+
+  function hideOfflineBanner() {
+    if (!offlineBanner) return;
+    networkConfirmedOnline = true;
+    offlineBanner.classList.remove('offline-visible');
+    offlineBanner.setAttribute('aria-hidden', 'true');
+  }
+
+  // Confirm online status with an actual fetch to /healthz.
+  // navigator.onLine has false positives (e.g. connected to Wi-Fi
+  // but no internet), so we always gate on a real network request.
+  function confirmNetworkStatus() {
+    // Abort any in-flight check.
+    if (networkCheckTimer) clearTimeout(networkCheckTimer);
+
+    fetch('/healthz', { method: 'GET', cache: 'no-store' })
+      .then(function (resp) {
+        if (resp.ok) {
+          hideOfflineBanner();
+        } else {
+          showOfflineBanner();
+        }
+      })
+      .catch(function () {
+        showOfflineBanner();
+      });
+  }
+
+  function initNetworkDetection() {
+    // Listen for browser online/offline events.
+    window.addEventListener('online', function () {
+      // Don't trust navigator.onLine alone — confirm with a real fetch.
+      confirmNetworkStatus();
+    });
+
+    window.addEventListener('offline', function () {
+      showOfflineBanner();
+    });
+
+    // Periodic health check (every 30s) to catch cases where
+    // the browser doesn't fire events reliably.
+    setInterval(function () {
+      // Only check if we think we're online — avoids spamming
+      // requests when we know we're offline.
+      if (navigator.onLine || networkConfirmedOnline) {
+        confirmNetworkStatus();
+      }
+    }, 30000);
+
+    // Initial check on page load.
+    if (!navigator.onLine) {
+      showOfflineBanner();
+    }
+  }
+
+  initNetworkDetection();
+
   // ── Connection ───────────────────────────────────────────
   // ── Rate-limit banner ─────────────────────────────────
   var rateLimitBanner = document.getElementById('rate-limit-banner');
