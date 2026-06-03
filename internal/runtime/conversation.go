@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 )
 
 const systemPromptBase = `You are Claude Code, an AI assistant for software engineering tasks. You have access to tools for running bash commands, reading and writing files, searching with glob patterns, and grepping for patterns in code. You also have access to web search and web fetch for retrieving real-time information from the internet. Use these tools to help users with coding tasks.
@@ -155,15 +156,6 @@ func (loop *ConversationLoop) ClearSession() {
 	}
 	loop.Compaction = CompactionState{}
 	loop.lastStopReason = ""
-}
-	mcpAPITools := loop.MCPRegistry.AllAPITools()
-	if len(mcpAPITools) == 0 {
-		return loop.Tools
-	}
-	combined := make([]api.Tool, 0, len(loop.Tools)+len(mcpAPITools))
-	combined = append(combined, loop.Tools...)
-	combined = append(combined, mcpAPITools...)
-	return combined
 }
 
 // SendMessage sends a user message and runs the full agentic loop.
@@ -931,11 +923,6 @@ func (loop *ConversationLoop) CompactNow(ctx context.Context) (string, error) {
 	contMsg := GetContinuationMessage(summary)
 	loop.Session.Messages = append([]api.Message{contMsg}, loop.Session.Messages...)
 	return summary, nil
-}
-
-// ClearSession resets the conversation history in the current session.
-func (loop *ConversationLoop) ClearSession() {
-	loop.Session.Messages = []api.Message{}
 }
 
 // ListSessions returns all session IDs saved in the configured session directory.
