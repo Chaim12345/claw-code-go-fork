@@ -29,6 +29,54 @@
   var pendingMessages = {};    // message_id → {text, timestamp}
   var ackedMessages = {};      // message_id → true (pruned after 60s)
 
+  // ── Theme switcher (system / light / dark) ───────────────
+  var themeToggle   = document.getElementById('theme-toggle');
+  var THEME_KEY     = 'claw_theme';
+  var THEME_CYCLE   = ['system', 'light', 'dark'];
+
+  function getCurrentTheme() {
+    return document.documentElement.getAttribute('data-theme') || 'system';
+  }
+
+  function applyTheme(theme) {
+    if (theme === 'system') {
+      document.documentElement.removeAttribute('data-theme');
+    } else {
+      document.documentElement.setAttribute('data-theme', theme);
+    }
+    localStorage.setItem(THEME_KEY, theme);
+    updateThemeToggleLabel(theme);
+  }
+
+  function updateThemeToggleLabel(theme) {
+    if (!themeToggle) return;
+    var labels = { system: '◐', light: '☀', dark: '☾' };
+    themeToggle.textContent = labels[theme] || '◐';
+  }
+
+  function cycleTheme() {
+    var current = getCurrentTheme();
+    var idx = THEME_CYCLE.indexOf(current);
+    var next = THEME_CYCLE[(idx + 1) % THEME_CYCLE.length];
+    applyTheme(next);
+  }
+
+  // Restore persisted theme on load.
+  (function () {
+    var saved = localStorage.getItem(THEME_KEY);
+    if (saved && (saved === 'light' || saved === 'dark')) {
+      applyTheme(saved);
+    } else if (saved === 'system') {
+      // Clear any explicit attribute so prefers-color-scheme takes over.
+      document.documentElement.removeAttribute('data-theme');
+      updateThemeToggleLabel('system');
+    }
+  })();
+
+  if (themeToggle) {
+    themeToggle.addEventListener('click', cycleTheme);
+  }
+
   // ── UUID generation (for message dedup) ──────────────────
   function generateUUID() {
     // crypto.randomUUID() is available in all modern browsers.

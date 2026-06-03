@@ -251,7 +251,7 @@ viewport with touch input, and gracefully scale up to desktop.
 
 - [x] **Keyboard shortcuts overlay** (`?` to toggle, lists all
   shortcuts). Touch users get a "?" button in the header.
-- [ ] **Theme switcher** with 3 options (system, light, dark),
+- [x] **Theme switcher** with 3 options (system, light, dark),
   persisted per-device.
 - [ ] **Font size control** (S/M/L) with 12-18px range, persisted.
 - [ ] **Code block actions**: copy button, "run in terminal" button
