@@ -240,7 +240,7 @@ viewport with touch input, and gracefully scale up to desktop.
 - [x] **Error page** at `/error?code=...&msg=...` rendered when the
   server fails to set up a session (e.g. provider down). Friendly
   UI, copy-paste correlation id.
-- [ ] **Health check enrichment**: `/healthz` returns JSON with
+- [x] **Health check enrichment**: `/healthz` returns JSON with
   status, version, uptime, active sessions, last provider error
   timestamp. Add a deep check `/readyz` that pings the configured
   provider.
