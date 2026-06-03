@@ -87,6 +87,112 @@ Drop markdown files into `.claw-code/memory/` and they're injected into every co
 
 ---
 
+## Web UI
+
+claw-code-go ships a production-ready, mobile-friendly web UI that runs
+alongside the terminal mode. Start it with the `web` subcommand:
+
+### Quick start
+
+```sh
+# Start the web server (opens the chat UI at http://127.0.0.1:7777)
+./claw-code-go web --addr 0.0.0.0:7777
+
+# With basic auth (protects all routes except /healthz)
+CLAW_WEB_AUTH=user:pass ./claw-code-go web --addr 0.0.0.0:7777
+
+# With bearer token (accepts ?token=... query param for browser bookmarking)
+CLAW_WEB_TOKEN=my-secret-token ./claw-code-go web --addr 0.0.0.0:7777
+```
+
+### What you get
+
+- **Chat UI** (`/`) — A mobile-first chat interface with streaming
+  responses, tool-call cards, permission prompts, slash commands, and
+  a session history sidebar. Works on a 375px-wide viewport with touch
+  input and gracefully scales up to desktop.
+
+- **Terminal mode** (`/terminal`) — The full Bubble Tea TUI streamed
+  to the browser via wterm (Zig/WASM terminal emulator). For power
+  users who prefer the terminal experience.
+
+- **Structured API** (`/api/chat/ws`) — A WebSocket endpoint that
+  streams structured `TurnEvent` JSON (text deltas, tool calls,
+  permissions, usage) for custom frontends. See
+  [docs/web-protocol.md](docs/web-protocol.md) for the wire format.
+
+- **PWA installable** — Add the chat UI to your home screen on
+  Android Chrome, iOS Safari, or desktop Chrome. Includes a service
+  worker for offline fallback, a web app manifest, and an iOS
+  "Add to Home Screen" instruction banner.
+
+- **Observability** — Structured JSON logs via `log/slog`, Prometheus
+  metrics at `/metrics`, health checks at `/healthz` and `/readyz`,
+  and a friendly error page at `/error`.
+
+- **Security** — HTTP Basic Auth (`CLAW_WEB_AUTH`), bearer token auth
+  (`CLAW_WEB_TOKEN`), Content-Security-Policy headers, rate limiting
+  (`CLAW_WEB_RATE_RPM`), and per-IP token buckets.
+
+### Auth configuration
+
+| Variable | Description |
+|---|---|
+| `CLAW_WEB_AUTH` | `user:pass` for HTTP Basic Auth on all protected routes |
+| `CLAW_WEB_AUTH_FILE` | Path to a file containing `user:pass` |
+| `CLAW_WEB_TOKEN` | Bearer token accepted via `Authorization: Bearer <token>` or `?token=<token>` query param |
+| `CLAW_WEB_RATE_RPM` | Max messages per minute per IP (default: 60) |
+
+### Production deployment
+
+Place the web server behind Caddy or nginx for TLS termination. Full
+configs (Caddyfile, nginx site config, systemd unit, firewall rules) are
+in [docs/web-deployment.md](docs/web-deployment.md). A quick Caddy
+example:
+
+```caddyfile
+chat.example.com {
+    reverse_proxy localhost:7777
+}
+```
+
+### Architecture
+
+```
+Browser (chat UI) ──WebSocket──> /api/chat/ws ──ConversationLoop──> AI Provider
+                                                                     (Anthropic / OpenAI)
+Browser (terminal)──WebSocket──> /ws ──PTY──> claw-code-go --repl
+```
+
+- **Chat mode** (`/api/chat/ws`): The browser sends `user_input` JSON
+  messages; the server runs the `ConversationLoop` and streams back
+  `text_delta`, `tool_start`, `tool_done`, `permission_ask`, `usage`,
+  and `done` events as structured JSON. Use this for custom frontends.
+
+- **PTY/Terminal mode** (`/ws`): A PTY runs the full Bubble Tea TUI.
+  Raw bytes stream to the wterm emulator in the browser. Use this
+  when you need the full terminal experience or want to keep using
+  the TUI remotely.
+
+Both modes share the same auth, provider, and model resolution. The
+default landing page (`/`) is the chat UI. The terminal is available
+at `/terminal` for power users.
+
+### Mobile install
+
+1. Open the chat UI in Chrome (Android or desktop) or Safari (iOS).
+2. **Android/Desktop Chrome**: tap the install icon in the address bar
+   or the three-dot menu → "Add to Home screen".
+3. **iOS Safari**: tap Share → "Add to Home Screen" (an instruction
+   banner appears automatically on first visit).
+4. The app opens in standalone mode (no browser chrome), works
+   offline, and supports the soft keyboard correctly.
+
+Full install verification steps are in
+[docs/web-deployment.md#pwa-install-verification](docs/web-deployment.md#pwa-install-verification).
+
+---
+
 ## Prerequisites
 
 - **Go 1.24+**

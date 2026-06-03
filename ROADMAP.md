@@ -260,7 +260,7 @@ viewport with touch input, and gracefully scale up to desktop.
 - [x] **Empty states**: friendly placeholder when there are no
   messages; "thinking…" indicator with elapsed time during long
   model calls; "model is rate-limited" message with a countdown.
-- [ ] **Update README.md** with a new "Web UI" section:
+- [x] **Update README.md** with a new "Web UI" section:
     - Quick start (`./claw-code-go web --addr 0.0.0.0:7777`)
     - Auth configuration
     - Production deployment (TLS, reverse proxy)
