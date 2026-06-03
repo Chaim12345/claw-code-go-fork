@@ -317,7 +317,7 @@ cover but the research showed are important.
   banner when connectivity is lost. Gating logic: always confirm with
   an actual fetch/WS failure, since `navigator.onLine` has false
   positives.
-- [ ] **iOS "Add to Home Screen" instruction banner**: a one-time
+- [x] **iOS "Add to Home Screen" instruction banner**: a one-time
   dismissible banner that shows iOS Safari users how to install
   (tap Share → "Add to Home Screen"). Only shown on iOS Safari,
   hidden after dismissal (stored in `localStorage`).
