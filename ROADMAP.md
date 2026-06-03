@@ -304,7 +304,7 @@ cover but the research showed are important.
   tappable chip buttons with suggested follow-up questions (Perplexity
   pattern). Reduces typing friction on mobile. Implement in
   `chat.html` JS.
-- [ ] **Thinking/status indicator with elapsed time**: show a small
+- [x] **Thinking/status indicator with elapsed time**: show a small
   indicator (e.g. "Thinking… 12s") during long model calls, visible
   in the message stream. Distinct from the Phase 6 empty-state
   placeholder — this is an in-stream element. Research shows ChatGPT
