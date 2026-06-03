@@ -64,6 +64,14 @@ type RalphConfig struct {
 	// config in-flight to inject the error into the next prompt.
 	// Users should not set this directly.
 	LastError string
+
+	// DeltaMode enables incremental context: each iteration sends
+	// only the new spec prompt instead of the full system+tools+
+	// spec context. Requires a provider with server-side session
+	// support (e.g., deepseek web chat API). When enabled, the
+	// provider's ResetSession() is NOT called between iterations
+	// so the server maintains the full conversation.
+	DeltaMode bool
 }
 
 // Defaults for the Ralph loop.
@@ -561,18 +569,13 @@ func RunRalphLoop(ctx context.Context, loop *ConversationLoop, cfg RalphConfig) 
 	// last error into the next prompt.
 	cfgPtr := &cfg
 	iter := func(ctx context.Context, i, max int) (RalphVerdictKind, string, error) {
-		// Reset the provider session so each iteration gets a
-		// fresh context. The spec file is the only persistent
-		// memory.
-		//
-		// Use the declared api.SessionResetter interface (no
-		// return value) — the previous inline assertion
-		// `interface{ ResetSession() error }` didn't match
-		// the actual provider signature, so session reset was
-		// a silent no-op and message history accumulated across
-		// iters until the prompt exceeded the model's cap.
-		if resetter, ok := loop.Client.(api.SessionResetter); ok {
-			resetter.ResetSession()
+		// In delta mode, keep the server-side session alive between
+		// iterations so the provider sends only the new message text
+		// via the parent_message_id chain.
+		if !cfgPtr.DeltaMode {
+			if resetter, ok := loop.Client.(api.SessionResetter); ok {
+				resetter.ResetSession()
+			}
 		}
 		// Also clear the loop's local message history. Without
 		// this, every prior user/assistant/tool turn accumulates

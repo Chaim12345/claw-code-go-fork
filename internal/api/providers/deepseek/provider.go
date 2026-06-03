@@ -44,8 +44,9 @@ func (p *Provider) NewClient(cfg api.ProviderConfig) (api.APIClient, error) {
 		wc.BaseURL = cfg.BaseURL
 	}
 	return &Client{
-		model: model,
-		web:   wc,
+		model:     model,
+		web:       wc,
+		deltaMode: cfg.DeltaMode,
 	}, nil
 }
 
@@ -62,6 +63,12 @@ type Client struct {
 	mu              sync.Mutex
 	chatSessionID   string
 	parentMessageID string
+
+	// deltaMode sends only the new user message text instead of the full
+	// system+tools+messages prompt. The server maintains conversation
+	// history via chat_session_id + parent_message_id. Requires the ralph
+	// loop to NOT call ResetSession() between iterations.
+	deltaMode bool
 
 	// Per-model settings discovered from /api/v0/client/settings?scope=model.
 	// Populated lazily on the first request and reused for the lifetime of
@@ -217,8 +224,6 @@ func (c *Client) StreamResponse(ctx context.Context, req api.CreateMessageReques
 		return nil, err
 	}
 
-	prompt := buildPrompt(req.System, req.Messages, req.Tools)
-
 	// Resolve the model spec for this request. cfg.Model is the friendly
 	// name (e.g. "expert-thinking", "instant-search"). When the caller
 	// doesn't set one we default to the Expert model — the deeper reasoning
@@ -231,13 +236,30 @@ func (c *Client) StreamResponse(ctx context.Context, req api.CreateMessageReques
 	}
 	modelCap := c.limitForModel(spec)
 
+	// Build the prompt. In delta mode (with an existing session), send
+	// only the new user message text; the server maintains the full
+	// conversation context via chat_session_id + parent_message_id.
+	c.mu.Lock()
+	parentID := c.parentMessageID
+	sessID := c.chatSessionID
+	deltaMode := c.deltaMode
+	c.mu.Unlock()
+	debugLog("StreamResponse: session=%s parent=%s delta=%v", sessID, parentID, deltaMode)
+
+	var prompt string
+	if deltaMode && parentID != "" {
+		if len(req.Messages) > 0 {
+			prompt = buildDeltaPrompt(req.Messages)
+		}
+	} else {
+		prompt = buildPrompt(req.System, req.Messages, req.Tools)
+	}
+
 	// Pre-flight: estimate input tokens and reject if we'd blow past the
-	// model-specific cap. The conversation loop's ShouldCompact uses
-	// EstimateTokens as a fallback, but the actual prompt we send is bigger
-	// (we flatten the system prompt + tool descriptions + messages into a
-	// single string), so check against the true prompt.
+	// model-specific cap. In delta mode, the estimate reflects only the
+	// new content — the server-side session adds the full context.
 	estimatedInput := EstimateTokens(prompt)
-	if modelCap > 0 && estimatedInput > modelCap {
+	if modelCap > 0 && !deltaMode && estimatedInput > modelCap {
 		return nil, fmt.Errorf(
 			"deepseek: prompt too large for %s (~%d tokens, limit %d). Compact the session or reduce history",
 			spec.CanonicalName(), estimatedInput, modelCap,
@@ -258,11 +280,6 @@ func (c *Client) StreamResponse(ctx context.Context, req api.CreateMessageReques
 	}
 	maxOutputChars := outputBudget * charsPerToken
 
-	c.mu.Lock()
-	parentID := c.parentMessageID
-	sessID := c.chatSessionID
-	c.mu.Unlock()
-	debugLog("StreamResponse: session=%s parent=%s", sessID, parentID)
 	var parentPtr *string
 	if parentID != "" {
 		parentPtr = &parentID
@@ -640,6 +657,25 @@ func buildPrompt(system string, messages []api.Message, tools []api.Tool) string
 	parts = append(parts, "\nRespond with the next assistant turn. To call a tool, output a JSON object like {\"tool_calls\":[{\"name\":\"...\",\"arguments\":{...}}]} on its own line, or use XML: <tool_calls><invoke name=\"tool_name\"><parameter name=\"arg\">value</parameter></invoke></tool_calls>.")
 
 	return strings.Join(parts, "\n\n")
+}
+
+// buildDeltaPrompt renders only the last user message(s) for delta mode.
+// Unlike buildPrompt, it does NOT include the system prompt, tool
+// descriptions, or conversation history — the server maintains those via
+// the chat_session_id + parent_message_id chain.
+func buildDeltaPrompt(messages []api.Message) string {
+	var parts []string
+	for _, msg := range messages {
+		if msg.Role != "user" {
+			continue
+		}
+		for _, block := range msg.Content {
+			if block.Type == "text" && block.Text != "" {
+				parts = append(parts, block.Text)
+			}
+		}
+	}
+	return strings.Join(parts, "\n")
 }
 
 func extractToolResultText(block api.ContentBlock) string {
