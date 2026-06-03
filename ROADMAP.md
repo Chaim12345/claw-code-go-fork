@@ -187,7 +187,7 @@ viewport with touch input, and gracefully scale up to desktop.
   to content up to a max of 8 rows). Submit on Enter, newline on
   Shift+Enter. Send button is a 44x44 touch target. Show character
   count when approaching the per-message limit.
-- [ ] **Slash command menu**: typing `/` opens a filtered list of
+- [x] **Slash command menu**: typing `/` opens a filtered list of
   available commands fetched once at session start (server exposes
   `/api/commands`). Arrow keys / tap to select, Enter to insert.
 - [ ] **Reconnection logic**: on WS close, retry with exponential
