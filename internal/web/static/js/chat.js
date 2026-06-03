@@ -193,6 +193,8 @@
     pendingMessages[msgId] = { text: text, timestamp: Date.now() };
     ws.send(JSON.stringify(payload));
     appendMessage('user', escapeHtml(text));
+    // Show thinking indicator after a delay (canceled when response arrives).
+    showThinkingIndicator();
     composerInput.value = '';
     composerInput.style.height = '';
     composerInput.style.overflowY = 'hidden';
@@ -225,11 +227,46 @@
   });
 
   // ── Message rendering ────────────────────────────────────
+  // ── Empty state management ────────────────────────────
+  var emptyStateEl = document.getElementById('empty-state');
+
+  function showEmptyState() {
+    if (emptyStateEl) emptyStateEl.style.display = '';
+  }
+
+  function hideEmptyState() {
+    if (emptyStateEl) emptyStateEl.style.display = 'none';
+  }
+
+  // Check whether any real messages exist (excluding empty-state and thinking).
+  function hasMessages() {
+    var children = messagesEl.children;
+    for (var i = 0; i < children.length; i++) {
+      var c = children[i];
+      if (c.id === 'empty-state') continue;
+      if (c.classList.contains('thinking-indicator')) continue;
+      return true;
+    }
+    return false;
+  }
+
+  function updateEmptyState() {
+    if (hasMessages()) {
+      hideEmptyState();
+    } else {
+      showEmptyState();
+    }
+  }
+
+  // Initial state: show empty state (no messages yet).
+  updateEmptyState();
+
   function appendMessage(role, html) {
     var wrapper = document.createElement('div');
     wrapper.className = 'message message-' + role;
     wrapper.innerHTML = html;
     messagesEl.appendChild(wrapper);
+    hideEmptyState();
     scrollToBottom();
   }
 
@@ -253,6 +290,68 @@
       enhanceCodeBlocks(currentBubble);
       currentBubble = null;
       currentBubbleContent = '';
+    }
+    // Remove thinking indicator when text arrives.
+    removeThinkingIndicator();
+  }
+
+  // ── Thinking indicator (shows "Thinking…" with elapsed time) ────
+  var thinkingEl = null;
+  var thinkingStartTime = 0;
+  var thinkingTimerInterval = null;
+  var THINKING_SHOW_DELAY = 1500; // show after 1.5s of waiting
+
+  function showThinkingIndicator() {
+    // Don't show if we already have one.
+    if (thinkingEl) return;
+
+    // Wait THINKING_SHOW_DELAY ms before showing — if we get a response
+    // before then, cancel.
+    thinkingStartTime = Date.now();
+    setTimeout(function () {
+      // Check that we still haven't gotten a response.
+      if (thinkingEl) return;
+      if (!thinkingStartTime) return; // cancelled
+      if (currentBubble && currentBubbleContent) return; // already getting text
+
+      thinkingEl = document.createElement('div');
+      thinkingEl.className = 'thinking-indicator';
+      thinkingEl.setAttribute('aria-label', 'Thinking…');
+
+      var dots = document.createElement('span');
+      dots.className = 'thinking-dots';
+      dots.innerHTML = '\u003cspan\u003e\u003c/span\u003e\u003cspan\u003e\u003c/span\u003e\u003cspan\u003e\u003c/span\u003e';
+      thinkingEl.appendChild(dots);
+
+      var label = document.createElement('span');
+      label.textContent = 'Thinking';
+      thinkingEl.appendChild(label);
+
+      var timer = document.createElement('span');
+      timer.className = 'thinking-timer';
+      thinkingEl.appendChild(timer);
+
+      messagesEl.appendChild(thinkingEl);
+      hideEmptyState();
+      scrollToBottom();
+
+      // Update elapsed time every second.
+      clearInterval(thinkingTimerInterval);
+      thinkingTimerInterval = setInterval(function () {
+        if (!thinkingEl) { clearInterval(thinkingTimerInterval); return; }
+        var elapsed = Math.floor((Date.now() - thinkingStartTime) / 1000);
+        timer.textContent = elapsed + 's';
+      }, 1000);
+    }, THINKING_SHOW_DELAY);
+  }
+
+  function removeThinkingIndicator() {
+    thinkingStartTime = 0;
+    clearInterval(thinkingTimerInterval);
+    thinkingTimerInterval = null;
+    if (thinkingEl) {
+      thinkingEl.remove();
+      thinkingEl = null;
     }
   }
 
@@ -636,6 +735,37 @@
   }
 
   // ── Connection ───────────────────────────────────────────
+  // ── Rate-limit banner ─────────────────────────────────
+  var rateLimitBanner = document.getElementById('rate-limit-banner');
+  var rateLimitCountdownEl = document.getElementById('rate-limit-countdown');
+  var rateLimitCountdownTimer = null;
+
+  function showRateLimitBanner(message) {
+    if (!rateLimitBanner) return;
+    rateLimitBanner.classList.add('rate-limit-visible');
+    // Countdown from 30 seconds.
+    var remaining = 30;
+    if (rateLimitCountdownEl) rateLimitCountdownEl.textContent = remaining + 's';
+    clearInterval(rateLimitCountdownTimer);
+    rateLimitCountdownTimer = setInterval(function () {
+      remaining--;
+      if (remaining <= 0) {
+        clearInterval(rateLimitCountdownTimer);
+        rateLimitCountdownTimer = null;
+        hideRateLimitBanner();
+        return;
+      }
+      if (rateLimitCountdownEl) rateLimitCountdownEl.textContent = remaining + 's';
+    }, 1000);
+  }
+
+  function hideRateLimitBanner() {
+    if (!rateLimitBanner) return;
+    rateLimitBanner.classList.remove('rate-limit-visible');
+    clearInterval(rateLimitCountdownTimer);
+    rateLimitCountdownTimer = null;
+  }
+
   function connect() {
     var protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     var wsURL = protocol + '//' + window.location.host + '/api/chat/ws';
@@ -648,6 +778,7 @@
     ws.onopen = function () {
       setStatus('connected');
       reconnectDelay = 1000;
+      hideRateLimitBanner();
       if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
       // Resend any user_input messages that haven't been ack'd yet.
       var now = Date.now();
@@ -687,7 +818,11 @@
           case 'permission_ask': showPermissionDialog(msg); break;
           case 'error':
             finalizeAssistantBubble();
-            appendMessage('error', 'Error: ' + escapeHtml(msg.error || 'unknown'));
+            if (msg.code === 'rate_limit') {
+              showRateLimitBanner(msg.message || 'Rate limited');
+            } else {
+              appendMessage('error', 'Error: ' + escapeHtml(msg.message || msg.error || 'unknown'));
+            }
             break;
           case 'done': finalizeAssistantBubble(); break;
           default: break;
@@ -824,6 +959,9 @@
     pendingMessages = {};
     ackedMessages = {};
     currentSessionID = null;
+    removeThinkingIndicator();
+    hideRateLimitBanner();
+    showEmptyState();
     // Reconnect will get a new session.
     setStatus('connecting');
     connect();

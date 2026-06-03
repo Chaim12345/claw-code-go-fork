@@ -257,7 +257,7 @@ viewport with touch input, and gracefully scale up to desktop.
 - [x] **Code block actions**: copy button, "run in terminal" button
   (if a TUI session is also open), download as file (uses the
   filename from a leading comment if present).
-- [ ] **Empty states**: friendly placeholder when there are no
+- [x] **Empty states**: friendly placeholder when there are no
   messages; "thinking…" indicator with elapsed time during long
   model calls; "model is rate-limited" message with a countdown.
 - [ ] **Update README.md** with a new "Web UI" section:

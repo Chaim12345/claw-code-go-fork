@@ -22,6 +22,12 @@
     <button id="shortcuts-toggle" aria-label="Keyboard shortcuts" title="Keyboard shortcuts (?)">?</button>
   </header>
 
+  <!-- Rate-limit banner (shown when model responds with rate_limit error) -->
+  <div id="rate-limit-banner" class="rate-limit-banner" role="alert">
+    <span class="rate-limit-icon" aria-hidden="true">⚠️</span>
+    <span id="rate-limit-text">Rate limited. Retrying in <span class="rate-limit-countdown" id="rate-limit-countdown">30s</span>…</span>
+  </div>
+
   <div id="layout">
     <aside id="sidebar">
       <nav>
@@ -34,6 +40,14 @@
     </aside>
 
     <main id="messages" aria-live="polite" role="log">
+      <!-- Empty state placeholder (shown when no messages) -->
+      <div id="empty-state" class="empty-state">
+        <div class="empty-state-icon" aria-hidden="true">💬</div>
+        <div class="empty-state-title">Start a conversation</div>
+        <div class="empty-state-subtitle">
+          Ask claw-code-go anything — code review, debugging, file editing, and more.
+        </div>
+      </div>
       <!-- Messages are inserted here by JS -->
     </main>
   </div>
