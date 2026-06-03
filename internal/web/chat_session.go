@@ -107,6 +107,16 @@ func runChatSession(ctx context.Context, conn *websocket.Conn, loop *runtime.Con
 				writeMu.Unlock()
 				continue
 			}
+			// Ack the message so the client knows it was received.
+			// This allows the client to avoid resending on reconnect.
+			if msg.MessageID != "" {
+				writeMu.Lock()
+				sendJSON(conn, chatproto.ServerOutbound{
+					Type:      chatproto.MsgAck,
+					MessageID: msg.MessageID,
+				})
+				writeMu.Unlock()
+			}
 			select {
 			case msgCh <- msg.Text:
 			case <-ctx.Done():

@@ -21,6 +21,8 @@
 // | S→Client  | usage                  | {"type":"usage","input_tokens":100,"output_tokens":200}
 // | S→Client  | done                   | {"type":"done","reason":"end_turn"}
 // | S→Client  | error                  | {"type":"error","code":"rate_limit","message":"Rate limited"}
+// | Client→S  | user_input (w/ id)     | {"type":"user_input","text":"Hello","message_id":"abc123"}
+// | S→Client  | ack                    | {"type":"ack","message_id":"abc123"}
 package chatproto
 
 // ClientInbound is any message the browser sends to the server over the WS.
@@ -29,7 +31,8 @@ type ClientInbound struct {
 	Type string `json:"type"`
 
 	// user_input
-	Text string `json:"text,omitempty"`
+	Text      string `json:"text,omitempty"`
+	MessageID string `json:"message_id,omitempty"` // client-generated UUID for dedup on reconnect
 
 	// permission_reply
 	ToolUseID string `json:"tool_use_id,omitempty"`
@@ -44,8 +47,9 @@ type ClientInbound struct {
 type ServerOutbound struct {
 	Type string `json:"type"`
 
-	// chat_session_init
+	// chat_session_init, ack
 	SessionID string `json:"session_id,omitempty"`
+	MessageID string `json:"message_id,omitempty"` // ack: echoes client message_id
 
 	// text_delta, text_final
 	Text string `json:"text,omitempty"`
@@ -95,4 +99,5 @@ const (
 	MsgDone            = "done"
 	MsgError           = "error"
 	MsgWarn            = "warn"
+	MsgAck             = "ack"
 )

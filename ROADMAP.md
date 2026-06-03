@@ -190,7 +190,7 @@ viewport with touch input, and gracefully scale up to desktop.
 - [x] **Slash command menu**: typing `/` opens a filtered list of
   available commands fetched once at session start (server exposes
   `/api/commands`). Arrow keys / tap to select, Enter to insert.
-- [ ] **Reconnection logic**: on WS close, retry with exponential
+- [x] **Reconnection logic**: on WS close, retry with exponential
   backoff (1s, 2s, 4s, max 30s). Show a small "reconnecting…" pill
   in the header. On reconnect, resend the last `user_input` only if
   the server hasn't ack'd it (use a per-message UUID + server

@@ -25,6 +25,24 @@
   var toolStartTime = null;
   var pendingToolCard = null;
 
+  // Reconnection / dedup state.
+  var pendingMessages = {};    // message_id → {text, timestamp}
+  var ackedMessages = {};      // message_id → true (pruned after 60s)
+
+  // ── UUID generation (for message dedup) ──────────────────
+  function generateUUID() {
+    // crypto.randomUUID() is available in all modern browsers.
+    if (typeof crypto !== 'undefined' && crypto.randomUUID) {
+      return crypto.randomUUID();
+    }
+    // Fallback for older browsers.
+    return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function (c) {
+      var r = Math.random() * 16 | 0;
+      var v = c === 'x' ? r : (r & 0x3 | 0x8);
+      return v.toString(16);
+    });
+  }
+
   // ── Visual Viewport ──────────────────────────────────────
   function handleViewportResize() {
     if (!window.visualViewport) return;
@@ -73,7 +91,10 @@
   function sendMessage() {
     var text = composerInput.value.trim();
     if (!text || !ws || ws.readyState !== WebSocket.OPEN) return;
-    ws.send(JSON.stringify({ type: 'user_input', text: text }));
+    var msgId = generateUUID();
+    var payload = { type: 'user_input', text: text, message_id: msgId };
+    pendingMessages[msgId] = { text: text, timestamp: Date.now() };
+    ws.send(JSON.stringify(payload));
     appendMessage('user', escapeHtml(text));
     composerInput.value = '';
     composerInput.style.height = '';
@@ -324,6 +345,19 @@
       setStatus('connected');
       reconnectDelay = 1000;
       if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
+      // Resend any user_input messages that haven't been ack'd yet.
+      var now = Date.now();
+      var ids = Object.keys(pendingMessages);
+      for (var i = 0; i < ids.length; i++) {
+        var mid = ids[i];
+        var pm = pendingMessages[mid];
+        // Only resend messages sent in the last 2 minutes.
+        if (now - pm.timestamp < 120000) {
+          ws.send(JSON.stringify({ type: 'user_input', text: pm.text, message_id: mid }));
+        } else {
+          delete pendingMessages[mid];
+        }
+      }
     };
 
     ws.onmessage = function (event) {
@@ -331,6 +365,15 @@
         var msg = JSON.parse(event.data);
         switch (msg.type) {
           case 'chat_session_init': break;
+          case 'ack':
+            // Server acknowledged a user_input; clear it from pending.
+            if (msg.message_id) {
+              delete pendingMessages[msg.message_id];
+              ackedMessages[msg.message_id] = true;
+              // Prune old acked entries after 60 seconds.
+              setTimeout(function () { delete ackedMessages[msg.message_id]; }, 60000);
+            }
+            break;
           case 'text_delta':  appendDelta(msg.text || ''); break;
           case 'text_final':  finalizeAssistantBubble(); break;
           case 'tool_start':  startToolCard(msg.tool_name, msg.input_summary || ''); break;

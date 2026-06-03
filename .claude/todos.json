@@ -1,32 +1,32 @@
 [
   {
     "id": "1",
-    "content": "Review and audit mobile compatibility issues",
-    "status": "done",
-    "priority": "high"
-  },
-  {
-    "id": "2",
-    "content": "Rewrite index.html with full mobile support: meta tags, responsive header, safe-area, virtual keyboard, touch handling",
+    "content": "Add message_ack type to chatproto protocol",
     "status": "in_progress",
     "priority": "high"
   },
   {
+    "id": "2",
+    "content": "Add reconnecting pill HTML element to header",
+    "status": "pending",
+    "priority": "high"
+  },
+  {
     "id": "3",
-    "content": "Add responsive/mobile CSS with touch-friendly sizing, safe areas, and media queries",
+    "content": "Add CSS styling for reconnecting pill",
     "status": "pending",
     "priority": "high"
   },
   {
     "id": "4",
-    "content": "Add mobile-specific JS: virtual keyboard awareness, touch scrolling, gesture handling",
+    "content": "Add JS reconnection logic with exponential backoff and UUID tracking",
     "status": "pending",
     "priority": "high"
   },
   {
     "id": "5",
-    "content": "Verify the server.go handles the changes correctly",
+    "content": "Verify with build and test, mark ROADMAP.md done",
     "status": "pending",
-    "priority": "medium"
+    "priority": "high"
   }
 ]
