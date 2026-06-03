@@ -128,15 +128,17 @@ test.describe('Error recovery', () => {
   });
 
   test('error page shows correlation ID', async ({ page }) => {
-    await page.goto(`${BASE_URL}/error?code=500&msg=Something+went+wrong`, {
-      waitUntil: 'domcontentloaded',
-    });
+    await page.goto(
+      `${BASE_URL}/error?code=500&msg=Something+went+wrong&corr=abc12345-def6-7890-abcd-ef1234567890`,
+      { waitUntil: 'domcontentloaded' }
+    );
 
     await expect(page.locator('body')).toContainText('Something went wrong');
 
-    // Should have a correlation ID or similar identifier
-    const body = await page.locator('body').textContent();
-    expect(body).toMatch(/[a-f0-9-]{8,}/i); // UUID-like pattern
+    // Should show the correlation ID
+    const corrBlock = page.locator('#correlation-id');
+    await expect(corrBlock).toBeVisible();
+    await expect(corrBlock).toContainText('abc12345-def6-7890-abcd-ef1234567890');
   });
 
   test('WebSocket reconnect indicator appears', async ({ page }) => {
