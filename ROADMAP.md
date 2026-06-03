@@ -203,7 +203,7 @@ viewport with touch input, and gracefully scale up to desktop.
 
 ## Phase 4 — PWA (installable, offline-ready)
 
-- [ ] **Web app manifest** at `/static/manifest.webmanifest`:
+- [x] **Web app manifest** at `/static/manifest.webmanifest`:
   name, short_name, start_url=`/`, display=`standalone`, theme_color,
   background_color, icons in 192px and 512px (and 180px for iOS apple-touch-icon).
 - [ ] **Service worker** at `/static/sw.js` (registered from

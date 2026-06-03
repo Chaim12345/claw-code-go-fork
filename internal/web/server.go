@@ -20,9 +20,11 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"mime"
 	"net/http"
 	"os"
 	"os/exec"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -35,6 +37,11 @@ import (
 
 //go:embed static
 var staticFS embed.FS
+
+func init() {
+	// Register the web manifest MIME type so browsers parse it correctly.
+	mime.AddExtensionType(".webmanifest", "application/manifest+json")
+}
 
 // Config configures the web server.
 type Config struct {
@@ -151,7 +158,7 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	data, err := staticFS.ReadFile("static/index.html")
+	data, err := staticFS.ReadFile("static/chat.html")
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -373,6 +380,10 @@ func staticCacheHandler(fsys fs.FS) http.Handler {
 	return http.StripPrefix("/static/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Set long-lived cache for all static assets.
 		w.Header().Set("Cache-Control", "public, max-age=3600")
+		// Ensure .webmanifest gets application/manifest+json content type.
+		if strings.HasSuffix(r.URL.Path, ".webmanifest") {
+			w.Header().Set("Content-Type", "application/manifest+json")
+		}
 		fileServer.ServeHTTP(w, r)
 	}))
 }
