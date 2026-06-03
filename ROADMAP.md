@@ -292,6 +292,43 @@ viewport with touch input, and gracefully scale up to desktop.
 
 ---
 
+## Phase 8 — UAT / UI / UX Testing
+
+- [x] **UAT smoke-test script**: create `web/e2e/uat.spec.ts` (Playwright) that walks through the core user journey:
+    - Open the chat UI → verify page loads, manifest meta tags present, service worker registered.
+    - Type a message in the composer → verify send button enables, message appears in chat, "thinking…" indicator shows.
+    - Wait for AI response → verify text_delta renders in real-time, final message bubble appears.
+    - Toggle theme (system/light/dark) → verify CSS vars update, preference persists across reload.
+    - Toggle font size (S/M/L) → verify message text size changes, preference persists.
+    - Open keyboard shortcuts overlay (`?`) → verify overlay appears, close via Escape/backdrop click.
+    - Verify offline banner: mock `navigator.onLine = false` → banner appears; restore → banner disappears.
+    - Verify code block copy button → click copies expected text to clipboard (requires `clipboard` permission in Playwright).
+    - Verify session sidebar loads and shows at least the current session.
+    - Run as a single `npx playwright test web/e2e/uat.spec.ts` command with a pre‑started `claw-code-go web --addr 127.0.0.1:7777 --provider deepseek`.
+- [ ] **Cross-browser UI verification**: run the UAT smoke test on Chromium, Firefox, and WebKit (Playwright supports all three). Document any known differences in `docs/web-deployment.md`.
+- [ ] **Responsive design visual check**: capture screenshots of the chat UI at 5 breakpoints (375px mobile, 390px iPhone 14, 768px tablet portrait, 1024px tablet landscape, 1440px desktop) in both light and dark mode. Store baselines in `web/e2e/baselines/responsive/`. Add a `web/test:responsive` Makefile target.
+- [ ] **Accessibility audit**:
+    - Run `axe-core` via Playwright on the chat UI: assert zero critical/serious violations.
+    - Verify keyboard navigation: Tab through all interactive elements (send button, theme switcher, code block actions, session list) — each must receive visible focus.
+    - Verify `aria-live="polite"` on message container for screen reader announcements.
+    - Verify all icons have `aria-label` or `title`.
+    - Verify color contrast ratios pass WCAG AA (use `@axe-core/playwright` or `pa11y-ci`).
+- [ ] **Load / stress test**:
+    - Open 10 concurrent chat WS connections with a fake provider client.
+    - Send 3 messages each, verify all receive `text_final` within 30s.
+    - Measure CPU and memory usage of the server process.
+    - Document results in `docs/web-deployment.md` under a new "Performance" section.
+- [ ] **User-facing error recovery tests**:
+    - Kill the provider connection mid-turn → verify UI shows "provider error" and automatic retry banner.
+    - Close and reopen the browser → verify the session sidebar still shows history.
+    - Trigger a rate-limit (send 70 messages in 1 min via script) → verify the UI shows the rate-limit banner with countdown.
+
+### Phase 8 additions — Added from user feedback
+
+- [x] **UAT feedback log**: after each smoke-test run, print a clear pass/fail table to stdout. Make the `web/e2e/uat.spec.ts` output useful for non‑developers (management, QA).
+
+---
+
 ## Items Added from Research
 
 The following items were added after reviewing the research findings

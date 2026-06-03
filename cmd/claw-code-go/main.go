@@ -316,6 +316,8 @@ func runWebSubcommand(args []string) {
 	cwd := fs.String("cwd", "", "Working directory for the spawned TUI (default: current dir)")
 	provider := fs.String("provider", "", "Forward --provider to the spawned TUI")
 	model := fs.String("model", "", "Forward --model to the spawned TUI")
+	delta := fs.Bool("delta", true, "Enable delta mode on the provider (send only new messages per turn, not full history)")
+	maxTurns := fs.Int("max-turns", 100, "Max turns per conversation (caps autonomous tool-use loops)")
 	_ = fs.Parse(args)
 
 	// The web subcommand itself doesn't need credentials — it just
@@ -354,12 +356,16 @@ func runWebSubcommand(args []string) {
 	if *provider != "" {
 		cfg := runtime.LoadConfig()
 		cfg.Autonomous = true
+		cfg.DeltaMode = *delta
+		if *maxTurns > 0 {
+			cfg.MaxTurns = *maxTurns
+		}
 		p, err := buildProvider(cfg)
 		if err == nil {
 			chatLoopFactory = func() *runtime.ConversationLoop {
 				return runtime.NewConversationLoop(cfg, p)
 			}
-			fmt.Fprintf(os.Stderr, "[web] chat mode enabled with provider %s\n", *provider)
+			fmt.Fprintf(os.Stderr, "[web] chat mode enabled with provider %s (delta=%v, max-turns=%d)\n", *provider, cfg.DeltaMode, cfg.MaxTurns)
 		} else {
 			fmt.Fprintf(os.Stderr, "[web] warning: could not build provider for chat mode: %v\n", err)
 		}
