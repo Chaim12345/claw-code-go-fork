@@ -70,6 +70,10 @@ type Server struct {
 
 	rateLimiter *rateLimiter
 
+	// chatSessions tracks metadata for chat WS sessions (the /api/chat/ws
+	// path) so the sidebar can show session history.
+	chatSessions *chatSessionStore
+
 	mu        sync.Mutex
 	sessions  map[*ptySession]struct{}
 }
@@ -83,10 +87,11 @@ func NewServer(cfg Config) *Server {
 		cfg.BinaryPath = os.Args[0]
 	}
 	return &Server{
-		cfg:         cfg,
-		upgrader:    websocket.Upgrader{CheckOrigin: func(r *http.Request) bool { return true }},
-		rateLimiter: newRateLimiter(),
-		sessions:    make(map[*ptySession]struct{}),
+		cfg:          cfg,
+		upgrader:     websocket.Upgrader{CheckOrigin: func(r *http.Request) bool { return true }},
+		rateLimiter:  newRateLimiter(),
+		chatSessions: newChatSessionStore(),
+		sessions:     make(map[*ptySession]struct{}),
 	}
 }
 
@@ -131,6 +136,7 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("/", s.handleIndex)
 	mux.HandleFunc("/ws", s.handleWS)
 	mux.HandleFunc("/api/chat/ws", s.handleChatWS)
+	mux.HandleFunc("/api/sessions", s.chatSessions.handleSessions)
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("ok"))
@@ -247,8 +253,9 @@ func (s *Server) handleChatWS(w http.ResponseWriter, r *http.Request) {
 	}
 	loop := s.ChatLoopFactory()
 	sessionID := newSessionID()
+	s.chatSessions.create(sessionID)
 	ctx := r.Context()
-	runChatSession(ctx, conn, loop, sessionID)
+	runChatSession(ctx, conn, loop, sessionID, s.chatSessions)
 	conn.Close()
 }
 

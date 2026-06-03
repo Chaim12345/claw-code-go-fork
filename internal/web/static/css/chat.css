@@ -198,6 +198,57 @@ body {
   color: #fff;
 }
 
+/* New session button */
+#new-session-btn {
+  display: block;
+  width: 100%;
+  margin-top: var(--space-md);
+  padding: var(--space-sm) var(--space-md);
+  border: 1px dashed var(--color-border);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--color-text-muted);
+  font-family: var(--font-sans);
+  font-size: var(--text-sm);
+  cursor: pointer;
+  text-align: center;
+  min-height: 36px;
+  transition: border-color 0.15s, color 0.15s, background 0.15s;
+}
+#new-session-btn:hover {
+  border-color: var(--color-primary);
+  color: var(--color-primary);
+  background: rgba(79, 70, 229, 0.05);
+}
+#new-session-btn:active {
+  transform: scale(0.97);
+}
+
+/* Session item time subtitle */
+.session-item .session-time {
+  display: block;
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+  margin-top: 2px;
+}
+.session-item.active .session-time {
+  color: rgba(255, 255, 255, 0.7);
+}
+
+/* Session item preview */
+.session-item .session-preview {
+  display: block;
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+  margin-top: 2px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.session-item.active .session-preview {
+  color: rgba(255, 255, 255, 0.7);
+}
+
 /* === Messages area === */
 #messages {
   flex: 1;

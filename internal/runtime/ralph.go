@@ -94,6 +94,13 @@ A spec file lives at {{.SpecPath}}. Read it. It contains a list of items (tasks,
   6. Commit the change with a clear conventional-commit message.
   7. Output a one-paragraph summary of what you did.
 
+CRITICAL: Batch all your work into as FEW tool calls as possible. Every tool call adds to the conversation and consumes token budget. Follow this pattern:
+  - FIRST: Read ALL files you need in a single batch of read_file calls.
+  - THEN: Plan all changes at once.
+  - THEN: Make ALL edits in a single batch of file_edit calls (one per file).
+  - THEN: Run ONE bash command to build/test.
+  Do NOT read files one at a time. Do NOT edit files one field at a time.
+
 If all items in the spec are already done, output the literal sentinel {{.Sentinel}} on its own line and stop.
 
 If you hit a real blocker (a missing dependency, a question only the human can answer, a contradiction in the spec), document it under a "## Blockers" heading at the bottom of the spec file with enough detail for the next iteration to pick up — then exit normally. The next iteration will start fresh with your note.

@@ -364,7 +364,9 @@
       try {
         var msg = JSON.parse(event.data);
         switch (msg.type) {
-          case 'chat_session_init': break;
+          case 'chat_session_init':
+            currentSessionID = msg.session_id || null;
+            break;
           case 'ack':
             // Server acknowledged a user_input; clear it from pending.
             if (msg.message_id) {
@@ -411,6 +413,139 @@
   sidebarToggle.addEventListener('click', function () {
     sidebar.classList.toggle('sidebar-open');
   });
+
+  // ── Session history sidebar ──────────────────────────────
+  var sessionList    = document.getElementById('session-list');
+  var newSessionBtn  = document.getElementById('new-session-btn');
+  var currentSessionID = null;
+  var SESSIONS_STORAGE_KEY = 'claw_chat_sessions';
+  var sessionMessages = {};    // sessionID → [messages HTML array]
+  var CACHED_SESSION_COUNT = 50; // max cached session message lists
+
+  // Load session list from server and render the sidebar.
+  function fetchSessions() {
+    var req = new XMLHttpRequest();
+    req.open('GET', '/api/sessions', true);
+    req.onload = function () {
+      if (req.status === 200) {
+        try {
+          var sessions = JSON.parse(req.responseText);
+          renderSessionList(sessions);
+        } catch (_) { /* ignore parse errors */ }
+      }
+    };
+    req.onerror = function () { /* server might not support sessions endpoint yet */ };
+    req.send();
+  }
+
+  // Format a time string relative to now for display.
+  function relativeTime(dateStr) {
+    if (!dateStr) return '';
+    var d = new Date(dateStr);
+    var now = Date.now();
+    var diff = now - d.getTime();
+    if (diff < 60000) return 'Just now';
+    if (diff < 3600000) return Math.floor(diff / 60000) + 'm ago';
+    if (diff < 86400000) return Math.floor(diff / 3600000) + 'h ago';
+    return d.toLocaleDateString();
+  }
+
+  function renderSessionList(sessions) {
+    if (!sessions || !sessions.length) return;
+    sessionList.innerHTML = '';
+    for (var i = 0; i < sessions.length; i++) {
+      var s = sessions[i];
+      var li = document.createElement('li');
+      li.className = 'session-item';
+      if (currentSessionID === s.id) li.classList.add('active');
+
+      var titleText = s.first_user_msg || s.last_assistant_msg || 'Session ' + (s.message_count || 0) + ' msgs';
+      if (titleText.length > 50) titleText = titleText.substring(0, 47) + '…';
+
+      var titleEl = document.createElement('span');
+      titleEl.textContent = titleText;
+      li.appendChild(titleEl);
+
+      var timeEl = document.createElement('span');
+      timeEl.className = 'session-time';
+      timeEl.textContent = relativeTime(s.last_active_at || s.created_at);
+      li.appendChild(timeEl);
+
+      (function (sessionID) {
+        li.addEventListener('click', function () {
+          activateSession(sessionID);
+          if (window.innerWidth < 768) sidebar.classList.remove('sidebar-open');
+        });
+      })(s.id);
+
+      sessionList.appendChild(li);
+    }
+  }
+
+  // Load messages for a session. If the session is currently active
+  // (WS connected), we just restore from in-memory cache; otherwise we
+  // show a note that only the current session's messages are available
+  // in the current tab.
+  function activateSession(sessionID) {
+    if (sessionID === currentSessionID) return;
+
+    // Mark active in sidebar.
+    var items = sessionList.querySelectorAll('.session-item');
+    for (var i = 0; i < items.length; i++) {
+      items[i].classList.remove('active');
+      if (items[i].dataset) items[i].classList.remove('active');
+    }
+    // For now, we just refresh the session list to update highlighting.
+    // Full session switching (loading past conversations) requires
+    // server-side session persistence which will come in a future phase.
+    currentSessionID = sessionID;
+    fetchSessions();
+  }
+
+  // New session: disconnect WS, clear messages, reconnect.
+  function startNewSession() {
+    if (ws) { ws.onclose = null; ws.close(); }
+    if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
+    // Save current messages before clearing.
+    if (currentSessionID) {
+      sessionMessages[currentSessionID] = messagesEl.innerHTML;
+      pruneSessionCache();
+    }
+    // Clear UI.
+    messagesEl.innerHTML = '';
+    currentBubble = null;
+    currentBubbleContent = '';
+    pendingToolCard = null;
+    toolStartTime = null;
+    pendingMessages = {};
+    ackedMessages = {};
+    currentSessionID = null;
+    // Reconnect will get a new session.
+    setStatus('connecting');
+    connect();
+    // Close mobile sidebar if open.
+    if (window.innerWidth < 768) sidebar.classList.remove('sidebar-open');
+  }
+
+  function pruneSessionCache() {
+    var keys = Object.keys(sessionMessages);
+    if (keys.length <= CACHED_SESSION_COUNT) return;
+    // Remove oldest entries (by key order).
+    var remove = keys.slice(0, keys.length - CACHED_SESSION_COUNT);
+    for (var i = 0; i < remove.length; i++) {
+      delete sessionMessages[remove[i]];
+    }
+  }
+
+  if (newSessionBtn) {
+    newSessionBtn.addEventListener('click', function () {
+      startNewSession();
+    });
+  }
+
+  // Fetch sessions on load and periodically.
+  fetchSessions();
+  setInterval(fetchSessions, 30000); // refresh every 30s
 
   setupKeyboardHandling();
   sendButton.disabled = true;

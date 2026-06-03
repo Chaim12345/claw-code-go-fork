@@ -20,9 +20,12 @@ import (
 // main goroutine reads client JSON messages and routes them into the
 // conversation (user_input, permission_reply).
 //
+// The store parameter (may be nil) is used to record session metadata
+// (user messages and assistant replies) for the sidebar history.
+//
 // The function returns when either the websocket closes or ctx is
 // cancelled. The caller should close the websocket after this returns.
-func runChatSession(ctx context.Context, conn *websocket.Conn, loop *runtime.ConversationLoop, sessionID string) {
+func runChatSession(ctx context.Context, conn *websocket.Conn, loop *runtime.ConversationLoop, sessionID string, store *chatSessionStore) {
 	// Send the hello.
 	sendJSON(conn, chatproto.ServerOutbound{
 		Type:      chatproto.MsgChatSessionInit,
@@ -73,6 +76,10 @@ func runChatSession(ctx context.Context, conn *websocket.Conn, loop *runtime.Con
 			writeMu.Lock()
 			sendJSON(conn, out)
 			writeMu.Unlock()
+			// Record assistant replies for sidebar history.
+			if store != nil && ev.Type == runtime.TurnEventTextFinal && ev.Text != "" {
+				store.recordAssistantReply(sessionID, ev.Text)
+			}
 		}
 	}()
 
@@ -116,6 +123,10 @@ func runChatSession(ctx context.Context, conn *websocket.Conn, loop *runtime.Con
 					MessageID: msg.MessageID,
 				})
 				writeMu.Unlock()
+			}
+			// Record the user message in the session store for sidebar history.
+			if store != nil {
+				store.recordUserMessage(sessionID, msg.Text)
 			}
 			select {
 			case msgCh <- msg.Text:

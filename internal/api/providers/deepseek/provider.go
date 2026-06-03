@@ -170,6 +170,14 @@ func isTransient(errMsg string) bool {
 	return false
 }
 
+func isLengthLimitError(err error) bool {
+	if err == nil {
+		return false
+	}
+	low := strings.ToLower(err.Error())
+	return strings.Contains(low, "length limit reached") || strings.Contains(low, "length limit")
+}
+
 // debugDeepSeek enables debug logging when DEEPSEEK_DEBUG=1
 var debugDeepSeek = os.Getenv("DEEPSEEK_DEBUG") == "1"
 
@@ -365,6 +373,22 @@ func (c *Client) StreamResponse(ctx context.Context, req api.CreateMessageReques
 						fmt.Fprintf(os.Stderr, "[deepseek] rate-limited: rotated to new token and resetting session\n")
 						c.resetSession()
 					}
+				} else if isLengthLimitError(lastErr) {
+					// Session exceeded length limit — create a fresh
+					// session and send the full prompt instead of delta.
+					backoff = 5 * time.Second
+					fmt.Fprintf(os.Stderr, "[deepseek] length limit: creating fresh session and resending full prompt\n")
+					c.resetSession()
+					if err := c.ensureSession(ctx); err != nil {
+						fmt.Fprintf(os.Stderr, "[deepseek] failed to create fresh session: %v\n", err)
+						return
+					}
+					c.mu.Lock()
+					sessID = c.chatSessionID
+					c.parentMessageID = ""
+					c.mu.Unlock()
+					parentPtr = nil
+					prompt = buildPrompt(req.System, req.Messages, req.Tools)
 				} else {
 					backoff = time.Duration(1<<attempt) * 200 * time.Millisecond
 				}

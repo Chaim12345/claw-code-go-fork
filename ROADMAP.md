@@ -195,7 +195,7 @@ viewport with touch input, and gracefully scale up to desktop.
   in the header. On reconnect, resend the last `user_input` only if
   the server hasn't ack'd it (use a per-message UUID + server
   ack).
-- [ ] **Session history sidebar**: list of past sessions from
+- [x] **Session history sidebar**: list of past sessions from
   `/api/sessions`. Tap to load. Active session is highlighted. On
   mobile, sidebar is a slide-in drawer; on desktop, a fixed column.
 

@@ -1,31 +1,43 @@
 [
   {
     "id": "1",
-    "content": "Add message_ack type to chatproto protocol",
-    "status": "in_progress",
+    "content": "Create session_store.go with chat session tracking and /api/sessions endpoint",
+    "status": "done",
     "priority": "high"
   },
   {
     "id": "2",
-    "content": "Add reconnecting pill HTML element to header",
-    "status": "pending",
+    "content": "Add GET /api/sessions endpoint to server routes",
+    "status": "done",
     "priority": "high"
   },
   {
     "id": "3",
-    "content": "Add CSS styling for reconnecting pill",
-    "status": "pending",
+    "content": "Update chat.html sidebar with New session button",
+    "status": "done",
     "priority": "high"
   },
   {
     "id": "4",
-    "content": "Add JS reconnection logic with exponential backoff and UUID tracking",
-    "status": "pending",
+    "content": "Update chat.js with session list fetching, rendering, tap-to-switch, per-session localStorage",
+    "status": "done",
     "priority": "high"
   },
   {
     "id": "5",
-    "content": "Verify with build and test, mark ROADMAP.md done",
+    "content": "Update chat.css with sidebar animations and new session button styles",
+    "status": "done",
+    "priority": "medium"
+  },
+  {
+    "id": "6",
+    "content": "Add server test for /api/sessions endpoint",
+    "status": "in_progress",
+    "priority": "high"
+  },
+  {
+    "id": "7",
+    "content": "Build \u0026 test, mark item done in ROADMAP.md, commit",
     "status": "pending",
     "priority": "high"
   }
