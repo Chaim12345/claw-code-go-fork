@@ -17,9 +17,9 @@
     <button type="button" id="sidebar-toggle" aria-label="Toggle sidebar" title="Toggle sidebar">☰</button>
     <h1>claw-code-go</h1>
     <span id="connection-status" class="status-pill status-connected">connected</span>
-    <button type="button" id="theme-toggle" aria-label="Switch theme" title="Switch theme (system/light/dark)">◐</button>
-    <button type="button" id="font-size-toggle" aria-label="Change font size" title="Font size (S/M/L)">A</button>
-    <button type="button" id="shortcuts-toggle" aria-label="Keyboard shortcuts" title="Keyboard shortcuts (?)">?</button>
+    <button type="button" id="theme-toggle" class="header-action-btn" aria-label="Switch theme" title="Switch theme (system/light/dark)">◐</button>
+    <button type="button" id="font-size-toggle" class="header-action-btn" aria-label="Change font size" title="Font size (S/M/L)">A</button>
+    <button type="button" id="shortcuts-toggle" class="header-action-btn" aria-label="Keyboard shortcuts" title="Keyboard shortcuts (?)">?</button>
   </header>
 
   <!-- Offline banner (shown when network connectivity is lost) -->
@@ -150,6 +150,7 @@
             <tr><td><kbd>?</kbd></td><td>Toggle this shortcuts menu</td></tr>
             <tr><td><kbd>Escape</kbd></td><td>Close shortcuts / permission dialogs</td></tr>
             <tr><td><kbd>/</kbd></td><td>Open slash command menu (in composer)</td></tr>
+            <tr><td colspan="2" style="padding-top: 8px;"><a href="/terminal" style="color: var(--color-primary); text-decoration: none; font-size: var(--text-xs);">Open PTY terminal →</a></td></tr>
           </tbody>
         </table>
       </div>

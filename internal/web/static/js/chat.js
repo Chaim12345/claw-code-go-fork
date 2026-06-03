@@ -140,20 +140,32 @@
     });
   }
 
-  // ── Visual Viewport ──────────────────────────────────────
+  // ── Visual Viewport (virtual keyboard handling) ────────────
+  var lastViewportHeight = 0;
   function handleViewportResize() {
     if (!window.visualViewport) return;
     var vp = window.visualViewport;
     var kh = window.innerHeight - vp.height;
-    if (kh > 100) { composer.style.paddingBottom = (kh + 8) + 'px'; scrollToBottom(); }
-    else { composer.style.paddingBottom = ''; }
-    if (vp.offsetTop > 0) messagesEl.scrollTop += vp.offsetTop;
+    if (kh > 100) {
+      // Keyboard is open — push composer above it
+      composer.style.paddingBottom = (kh + 8) + 'px';
+      // Scroll messages to bottom so the latest message is visible
+      requestAnimationFrame(scrollToBottom);
+    } else {
+      composer.style.paddingBottom = '';
+    }
+    // Track viewport changes for orientation changes
+    lastViewportHeight = vp.height;
   }
   function setupKeyboardHandling() {
     if (window.visualViewport) {
       window.visualViewport.addEventListener('resize', handleViewportResize);
       window.visualViewport.addEventListener('scroll', handleViewportResize);
     }
+    // Also handle orientation changes (mobile rotate)
+    window.addEventListener('orientationchange', function () {
+      setTimeout(handleViewportResize, 150);
+    });
   }
 
   // ── Composer ─────────────────────────────────────────────

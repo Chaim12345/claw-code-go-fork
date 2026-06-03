@@ -125,17 +125,22 @@ body {
   grid-area: header;
   display: flex;
   align-items: center;
-  gap: var(--space-md);
-  padding: 0 var(--space-lg);
+  gap: var(--space-sm);
+  padding: 0 var(--space-md);
   background: var(--color-surface);
   border-bottom: 1px solid var(--color-border);
   height: var(--topbar-height);
+  overflow: hidden;
 }
 
 #top-bar h1 {
-  font-size: var(--text-lg);
+  font-size: var(--text-base);
   font-weight: 600;
   flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 #sidebar-toggle {
@@ -144,27 +149,77 @@ body {
   font-size: 1.25rem;
   cursor: pointer;
   color: var(--color-text);
-  width: 36px;
-  height: 36px;
+  width: 44px;
+  height: 44px;
+  min-width: 44px;
   display: flex;
   align-items: center;
   justify-content: center;
   border-radius: var(--radius-sm);
+  -webkit-tap-highlight-color: transparent;
 }
 #sidebar-toggle:hover {
   background: var(--color-border);
 }
 
-/* Connection status pill */
+/* Status pill */
 .status-pill {
   font-size: var(--text-xs);
-  padding: 2px 10px;
+  padding: 2px 8px;
   border-radius: 12px;
   font-weight: 500;
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 .status-connected     { background: var(--color-accent); color: #fff; }
 .status-reconnecting  { background: #f59e0b; color: #000; }
 .status-disconnected  { background: var(--color-danger); color: #fff; }
+
+/* Hide status pill on very narrow screens to save space */
+@media (max-width: 420px) {
+  .status-pill { display: none; }
+}
+
+/* Header action buttons — touch-friendly 44px targets */
+.header-action-btn {
+  background: none;
+  border: 1px solid var(--color-border);
+  cursor: pointer;
+  color: var(--color-text);
+  width: 36px;
+  height: 36px;
+  min-width: 36px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-sm);
+  font-family: var(--font-sans);
+  transition: background 0.15s, color 0.15s;
+  -webkit-tap-highlight-color: transparent;
+  flex-shrink: 0;
+}
+.header-action-btn:hover {
+  background: var(--color-border);
+  color: var(--color-text);
+}
+.header-action-btn:active {
+  transform: scale(0.93);
+}
+
+#theme-toggle { font-size: 1.1rem; }
+#font-size-toggle { font-size: 0.85rem; font-weight: 700; }
+#shortcuts-toggle { font-size: 1rem; font-weight: 600; color: var(--color-text-muted); }
+
+/* On very narrow screens, shrink header buttons further */
+@media (max-width: 380px) {
+  .header-action-btn {
+    width: 32px;
+    height: 32px;
+    min-width: 32px;
+    font-size: 0.9rem;
+  }
+  #top-bar { gap: 4px; padding: 0 var(--space-sm); }
+}
 
 /* === Layout (sidebar + main) === */
 #layout {
@@ -284,13 +339,14 @@ footer {
   display: flex;
   align-items: flex-end;
   gap: var(--space-sm);
-  padding: var(--space-md) var(--space-lg);
-  padding-bottom: max(var(--space-md), env(safe-area-inset-bottom));
+  padding: var(--space-sm) var(--space-md);
+  padding-bottom: max(var(--space-sm), env(safe-area-inset-bottom));
 }
 
 #composer-wrapper {
   flex: 1;
   position: relative;
+  min-width: 0;
 }
 
 #composer-input {
@@ -298,8 +354,8 @@ footer {
   resize: none;
   border: 1px solid var(--color-border);
   border-radius: var(--radius-md);
-  padding: var(--space-md);
-  padding-bottom: calc(var(--space-md) + 18px); /* room for char count */
+  padding: var(--space-sm) var(--space-md);
+  padding-bottom: calc(var(--space-sm) + 18px); /* room for char count */
   font-family: var(--font-sans);
   font-size: var(--text-base);
   color: var(--color-text);
@@ -307,10 +363,26 @@ footer {
   outline: none;
   line-height: 1.5;
   transition: border-color 0.15s, box-shadow 0.15s;
+  max-height: 200px;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
 }
 #composer-input:focus {
   border-color: var(--color-primary);
   box-shadow: 0 0 0 2px rgba(79, 70, 229, 0.2);
+}
+
+/* Mobile: make composer input larger touch target */
+@media (max-width: 767px) {
+  #composer {
+    padding: var(--space-xs) var(--space-sm);
+    padding-bottom: max(var(--space-xs), env(safe-area-inset-bottom));
+  }
+  #composer-input {
+    font-size: 16px; /* prevents iOS zoom on focus */
+    padding: var(--space-md);
+    padding-bottom: calc(var(--space-md) + 18px);
+  }
 }
 
 /* Character count — hidden until approaching limit */
@@ -352,15 +424,31 @@ footer {
   display: flex;
   align-items: center;
   justify-content: center;
-  transition: background 0.15s;
+  transition: background 0.15s, transform 0.1s;
+  -webkit-tap-highlight-color: transparent;
+  flex-shrink: 0;
 }
 #send-button:hover {
   background: var(--color-primary-hover);
+}
+#send-button:active {
+  transform: scale(0.9);
 }
 #send-button:disabled {
   background: var(--color-border);
   color: var(--color-text-muted);
   cursor: default;
+  transform: none;
+}
+
+/* Mobile: slightly smaller send button but still touch-friendly */
+@media (max-width: 767px) {
+  #send-button {
+    width: 40px;
+    height: 40px;
+    min-width: 40px;
+    font-size: 1.1rem;
+  }
 }
 
 /* === Scrollbar styling === */
@@ -372,6 +460,15 @@ footer {
 #sidebar::-webkit-scrollbar-thumb {
   background: var(--color-border);
   border-radius: 3px;
+}
+
+/* Momentum scrolling for touch devices */
+#messages,
+#sidebar,
+.shortcuts-card,
+.perm-card {
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
 }
 
 /* === Responsive: tablet+ show sidebar === */
@@ -583,6 +680,21 @@ footer {
   font-size: var(--text-sm);
   line-height: 1.5;
   word-wrap: break-word;
+  overflow-wrap: break-word;
+}
+
+/* Mobile: messages use more screen width */
+@media (max-width: 767px) {
+  .message {
+    max-width: 92%;
+    padding: var(--space-sm) var(--space-md);
+  }
+  .message-user {
+    border-bottom-right-radius: var(--radius-sm);
+  }
+  .message-assistant {
+    border-bottom-left-radius: var(--radius-sm);
+  }
 }
 .message-user {
   align-self: flex-end;
@@ -674,6 +786,15 @@ footer {
   transition: background 0.15s, color 0.15s, border-color 0.15s;
   -webkit-tap-highlight-color: transparent;
   min-height: 28px;
+}
+
+/* Mobile: bigger touch targets for code action buttons */
+@media (max-width: 767px) {
+  .code-action-btn {
+    min-height: 36px;
+    padding: 6px 12px;
+    font-size: var(--text-sm);
+  }
 }
 .code-action-btn:hover {
   background: var(--color-border);
@@ -861,6 +982,15 @@ footer {
   line-height: 1.4;
 }
 
+/* Mobile: bigger followup chips for touch */
+@media (max-width: 767px) {
+  .followup-chip {
+    min-height: 38px;
+    padding: 8px 16px;
+    font-size: var(--text-sm);
+  }
+}
+
 .followup-chip:hover {
   background: var(--color-primary);
   color: #fff;
@@ -997,86 +1127,7 @@ footer {
   margin: 0 2px;
 }
 
-/* === Theme toggle button === */
-#theme-toggle {
-  background: none;
-  border: 1px solid var(--color-border);
-  font-size: 1.1rem;
-  cursor: pointer;
-  color: var(--color-text);
-  width: 32px;
-  height: 32px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: var(--radius-sm);
-  font-family: var(--font-sans);
-  transition: background 0.15s, color 0.15s;
-  -webkit-tap-highlight-color: transparent;
-  line-height: 1;
-}
-#theme-toggle:hover {
-  background: var(--color-border);
-  color: var(--color-text);
-}
-#theme-toggle:active {
-  transform: scale(0.95);
-}
-
-/* === Font size toggle button === */
-#font-size-toggle {
-  background: none;
-  border: 1px solid var(--color-border);
-  font-size: 0.85rem;
-  font-weight: 700;
-  cursor: pointer;
-  color: var(--color-text);
-  width: 32px;
-  height: 32px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: var(--radius-sm);
-  font-family: var(--font-sans);
-  transition: background 0.15s, color 0.15s;
-  -webkit-tap-highlight-color: transparent;
-  line-height: 1;
-}
-#font-size-toggle:hover {
-  background: var(--color-border);
-  color: var(--color-text);
-}
-#font-size-toggle:active {
-  transform: scale(0.95);
-}
-
-/* === Shortcuts toggle button === */
-#shortcuts-toggle {
-  background: none;
-  border: 1px solid var(--color-border);
-  font-size: 1rem;
-  font-weight: 600;
-  cursor: pointer;
-  color: var(--color-text-muted);
-  width: 32px;
-  height: 32px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: var(--radius-sm);
-  font-family: var(--font-sans);
-  transition: background 0.15s, color 0.15s;
-  -webkit-tap-highlight-color: transparent;
-}
-#shortcuts-toggle:hover {
-  background: var(--color-border);
-  color: var(--color-text);
-}
-#shortcuts-toggle:active {
-  transform: scale(0.95);
-}
-
-/* === Shortcuts overlay === */
+/* === iOS Install Banner === */
 #shortcuts-overlay {
   position: fixed;
   inset: 0;

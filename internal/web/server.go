@@ -159,6 +159,7 @@ func (s *Server) routes() http.Handler {
 	}
 	mux.Handle("/static/", staticCacheHandler(staticSub))
 	mux.HandleFunc("/", s.handleIndex)
+	mux.HandleFunc("/terminal", s.handleTerminal)
 	mux.HandleFunc("/ws", s.handleWS)
 	mux.HandleFunc("/api/chat/ws", s.handleChatWS)
 	mux.HandleFunc("/api/sessions", s.chatSessions.handleSessions)
@@ -180,6 +181,18 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	data, err := staticFS.ReadFile("static/chat.html")
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	_, _ = w.Write(data)
+}
+
+// handleTerminal serves the legacy PTY/wterm terminal view at /terminal.
+func (s *Server) handleTerminal(w http.ResponseWriter, r *http.Request) {
+	data, err := staticFS.ReadFile("static/index.html")
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
