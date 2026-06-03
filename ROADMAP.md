@@ -385,6 +385,36 @@ cover but the research showed are important.
 
 ## Blockers
 
+### All remaining Phase 8 items — ENVIRONMENTAL BLOCKER (2026-06-03)
+
+The five unchecked Phase 8 items all require Playwright to launch real
+browsers (Chromium, Firefox, WebKit) against a running server. This
+environment is Termux on Android (`process.platform === "android"`).
+Playwright-core throws `"Unsupported platform: android"` and cannot
+install or launch any browser binaries. Additionally, `go test ./...`
+times out (>30s) and `go build ./...` also times out — likely due to
+resource constraints (mobile CPU, no CGo cross-compilation support for
+some native deps).
+
+**Affected items:**
+- [ ] Cross-browser UI verification (needs Playwright Chromium + Firefox + WebKit)
+- [ ] Responsive design visual check (needs Playwright Chromium for screenshots)
+- [ ] Accessibility audit (needs Playwright + axe-core)
+- [ ] Load / stress test (needs Playwright + real server process)
+- [ ] User-facing error recovery tests (needs Playwright + server)
+
+**Resolution path:** These items require a Linux/macOS/Windows
+development machine with:
+- Playwright browsers installed (`npx playwright install --with-deps`)
+- A running `claw-code-go web` server
+- `go build ./...` and `go test ./...` passing (requires non-Android
+  Go toolchain with CGo support for native dependencies)
+
+Until the environment is upgraded, no further Phase 8 progress is
+possible. The ROADMAP is otherwise complete through Phase 7 and the
+Phase 8 UAT smoke-test script (which is written and ready to run, just
+needs a compatible host).
+
 ### ~~Phase 1 item 2 (Implement `/api/chat/ws`) and item 3 (Go tests)~~ — RESOLVED 2026-06-02
 
 The previous iteration incorrectly reported that `ConversationLoop`
