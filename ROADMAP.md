@@ -254,7 +254,7 @@ viewport with touch input, and gracefully scale up to desktop.
 - [x] **Theme switcher** with 3 options (system, light, dark),
   persisted per-device.
 - [x] **Font size control** (S/M/L) with 12-18px range, persisted.
-- [ ] **Code block actions**: copy button, "run in terminal" button
+- [x] **Code block actions**: copy button, "run in terminal" button
   (if a TUI session is also open), download as file (uses the
   filename from a leading comment if present).
 - [ ] **Empty states**: friendly placeholder when there are no

@@ -458,9 +458,9 @@ footer {
 .message pre {
   background: var(--color-bg);
   border: 1px solid var(--color-border);
-  border-radius: var(--radius-sm);
+  border-radius: 0 0 var(--radius-sm) var(--radius-sm);
   padding: var(--space-md);
-  margin: var(--space-sm) 0;
+  margin: 0;
   overflow-x: auto;
   font-family: var(--font-mono);
   font-size: var(--text-xs);
@@ -474,6 +474,64 @@ footer {
   background: var(--color-border);
   padding: 1px 4px;
   border-radius: 3px;
+}
+
+/* === Code block wrapper (container for pre + action bar) === */
+.code-block-wrapper {
+  margin: var(--space-sm) 0;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+}
+
+.code-filename {
+  display: block;
+  padding: var(--space-xs) var(--space-md);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+  background: var(--color-surface);
+  border-bottom: 1px solid var(--color-border);
+}
+
+/* Code block action bar */
+.code-actions {
+  display: flex;
+  gap: var(--space-xs);
+  padding: var(--space-xs) var(--space-sm);
+  background: var(--color-surface);
+  border-top: 1px solid var(--color-border);
+}
+
+.code-action-btn {
+  padding: 3px 10px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg);
+  color: var(--color-text-muted);
+  font-family: var(--font-sans);
+  font-size: var(--text-xs);
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+  -webkit-tap-highlight-color: transparent;
+  min-height: 28px;
+}
+.code-action-btn:hover {
+  background: var(--color-border);
+  color: var(--color-text);
+  border-color: var(--color-text-muted);
+}
+.code-action-btn:active {
+  transform: scale(0.95);
+}
+
+.code-action-run {
+  color: var(--color-accent);
+  border-color: var(--color-accent);
+}
+.code-action-run:hover {
+  background: var(--color-accent);
+  color: #fff;
 }
 
 /* === Permission prompts (modal / bottom sheet) === */

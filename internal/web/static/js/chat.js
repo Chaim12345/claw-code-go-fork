@@ -250,6 +250,7 @@
   function finalizeAssistantBubble() {
     if (currentBubble) {
       currentBubble.innerHTML = renderMarkdown(currentBubbleContent);
+      enhanceCodeBlocks(currentBubble);
       currentBubble = null;
       currentBubbleContent = '';
     }
@@ -420,6 +421,212 @@
       .replace(/</g, '<')
       .replace(/>/g, '>')
       .replace(/"/g, '"');
+  }
+
+  // ── Code block actions (copy, download, run in terminal) ─
+  function enhanceCodeBlocks(bubble) {
+    var pres = bubble.querySelectorAll('pre');
+    for (var i = 0; i < pres.length; i++) {
+      var pre = pres[i];
+      // Skip if already enhanced.
+      if (pre.parentNode.classList.contains('code-block-wrapper')) continue;
+
+      var code = pre.querySelector('code');
+      if (!code) continue;
+      var codeText = code.textContent || '';
+
+      // Wrap pre in a container for the action bar.
+      var wrapper = document.createElement('div');
+      wrapper.className = 'code-block-wrapper';
+      pre.parentNode.insertBefore(wrapper, pre);
+      wrapper.appendChild(pre);
+
+      // Determine language from class e.g. "language-go".
+      var lang = '';
+      if (code.className) {
+        var match = code.className.match(/language-(\w+)/);
+        if (match) lang = match[1];
+      }
+
+      // Detect filename from a leading comment line.
+      var filename = detectFilename(codeText, lang);
+      if (filename) {
+        var fnEl = document.createElement('span');
+        fnEl.className = 'code-filename';
+        fnEl.textContent = filename;
+        wrapper.appendChild(fnEl);
+      }
+
+      // Action bar with buttons.
+      var bar = document.createElement('div');
+      bar.className = 'code-actions';
+
+      // Copy button.
+      var copyBtn = document.createElement('button');
+      copyBtn.className = 'code-action-btn';
+      copyBtn.textContent = 'Copy';
+      copyBtn.title = 'Copy to clipboard';
+      copyBtn.addEventListener('click', function () {
+        copyCodeBlock(codeText, copyBtn);
+      });
+      bar.appendChild(copyBtn);
+
+      // Download button.
+      var dlBtn = document.createElement('button');
+      dlBtn.className = 'code-action-btn';
+      dlBtn.textContent = 'Download';
+      dlBtn.title = 'Download as file';
+      dlBtn.addEventListener('click', function () {
+        downloadCodeBlock(codeText, filename, lang);
+      });
+      bar.appendChild(dlBtn);
+
+      // "Run in terminal" button — only if a TUI session is available.
+      // The /terminal page uses the same host for wterm, so we check if
+      // the user could plausibly have a terminal session open.
+      var runBtn = document.createElement('button');
+      runBtn.className = 'code-action-btn code-action-run';
+      runBtn.textContent = '▶ Run';
+      runBtn.title = 'Run in terminal (open /terminal first)';
+      runBtn.addEventListener('click', function () {
+        runInTerminal(codeText, lang);
+      });
+      bar.appendChild(runBtn);
+
+      wrapper.appendChild(bar);
+    }
+  }
+
+  function copyCodeBlock(text, btn) {
+    navigator.clipboard.writeText(text).then(function () {
+      btn.textContent = 'Copied!';
+      setTimeout(function () { btn.textContent = 'Copy'; }, 2000);
+    }).catch(function () {
+      btn.textContent = 'Error';
+      setTimeout(function () { btn.textContent = 'Copy'; }, 2000);
+    });
+  }
+
+  function downloadCodeBlock(text, filename, lang) {
+    var resolvedName = filename || 'code-snippet';
+    // Add extension based on language if no filename provided.
+    if (!filename && lang) {
+      var ext = extensionForLang(lang);
+      if (ext) resolvedName = resolvedName + ext;
+    }
+    var blob = new Blob([text], { type: 'text/plain;charset=utf-8' });
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement('a');
+    a.href = url;
+    a.download = resolvedName;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }
+
+  function runInTerminal(text, lang) {
+    // Open /terminal in a new tab, then the user can paste the code.
+    // We also provide a copy-to-clipboard convenience so the user
+    // can paste immediately.
+    var cmd = '';
+    // For bash/shell snippets, the code is directly runnable.
+    if (lang === 'bash' || lang === 'sh' || lang === 'shell' || !lang) {
+      cmd = text;
+    } else {
+      // For other languages, wrap in a comment showing what to do.
+      cmd = '# Copy the code below and run it in your terminal:\n' + text;
+    }
+    navigator.clipboard.writeText(cmd).then(function () {
+      var win = window.open('/terminal', '_blank');
+      if (!win) {
+        // Popup blocked — just inform the user.
+        appendMessage('assistant', 'Code copied to clipboard. <a href="/terminal" target="_blank" rel="noopener">Open terminal</a> to paste and run.');
+      } else {
+        // Brief toast-like feedback.
+        appendMessage('assistant', 'Code copied to clipboard — paste it in the terminal tab.');
+      }
+    }).catch(function () {
+      window.open('/terminal', '_blank');
+    });
+  }
+
+  function extensionForLang(lang) {
+    var map = {
+      'go':         '.go',
+      'golang':     '.go',
+      'typescript': '.ts',
+      'ts':         '.ts',
+      'javascript': '.js',
+      'js':         '.js',
+      'python':     '.py',
+      'py':         '.py',
+      'bash':       '.sh',
+      'sh':         '.sh',
+      'shell':      '.sh',
+      'json':       '.json',
+      'html':       '.html',
+      'css':        '.css',
+      'yaml':       '.yaml',
+      'yml':        '.yml',
+      'toml':       '.toml',
+      'rust':       '.rs',
+      'rs':         '.rs',
+      'c':          '.c',
+      'cpp':        '.cpp',
+      'java':       '.java',
+      'sql':        '.sql',
+      'dockerfile': '',
+      'makefile':   ''
+    };
+    return map[lang] || '.' + lang;
+  }
+
+  // Detect a filename hint from a leading comment in the code.
+  // e.g. "// foo/bar.go" or "# path/to/file.py" or "// File: main.go"
+  function detectFilename(codeText, lang) {
+    var lines = codeText.split('\n');
+    if (!lines.length) return '';
+
+    // Check first 3 lines for filename patterns.
+    for (var i = 0; i < Math.min(lines.length, 3); i++) {
+      var line = lines[i].trim();
+
+      // Match: // path/to/file.go or # path/to/file.py or -- path/to/file.lua
+      // The path must contain a dot (extension) and look like a file path.
+      var commentPrefixes = ['//', '#', '--', ';;'];
+      for (var j = 0; j < commentPrefixes.length; j++) {
+        var prefix = commentPrefixes[j];
+        if (line.indexOf(prefix) === 0) {
+          var after = line.substring(prefix.length).trim();
+          // Remove "File:" or "file:" prefix.
+          after = after.replace(/^(?:File|file):\s*/i, '');
+          // Check if it looks like a filename (has extension, no spaces).
+          if (/^[\w./-]+\.[a-zA-Z]\w*$/.test(after)) {
+            // Extract just the basename.
+            var parts = after.split('/');
+            return parts[parts.length - 1];
+          }
+          // Also match patterns like "filename: path/to/file" or "@file path/to/file"
+        }
+      }
+
+      // Match: @file path/to/file.go
+      var fileMatch = line.match(/^@file\s+([\w./-]+\.[a-zA-Z]\w*)/);
+      if (fileMatch) {
+        var fparts = fileMatch[1].split('/');
+        return fparts[fparts.length - 1];
+      }
+    }
+
+    // Heuristic: if code looks like a complete file, try to infer name.
+    // e.g. "package main" → main.go
+    if (!lang || lang === 'go') {
+      var pkgMatch = codeText.match(/^package\s+(\w+)/m);
+      if (pkgMatch) return pkgMatch[1] + '.go';
+    }
+
+    return '';
   }
 
   function scrollToBottom() {
