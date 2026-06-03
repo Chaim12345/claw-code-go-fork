@@ -115,11 +115,11 @@
 <div class="card">
   <div class="icon">&#9888;&#65039;</div>
   <h1 id="error-title">Something went wrong</h1>
-  <p class="code" id="error-code"></p>
-  <p class="message" id="error-message"></p>
-  <div class="correlation" id="correlation-block" hidden>
+  <p class="code" id="error-code">{{.Code}}</p>
+  <p class="message" id="error-message">{{.Msg}}</p>
+  <div class="correlation" id="correlation-block" {{if not .Corr}}hidden{{end}}>
     <span class="correlation-label">Correlation ID</span>
-    <span id="correlation-id"></span>
+    <span id="correlation-id">{{.Corr}}</span>
   </div>
   <div class="actions">
     <a href="/" class="btn btn-primary">&#8592; Back to Chat</a>

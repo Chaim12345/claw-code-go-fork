@@ -213,12 +213,20 @@ func (s *Server) handleError(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
+	// Server-side substitution for query params so tests (and
+	// non-JS clients) can see the values in the HTML.
+	q := r.URL.Query()
+	if code := q.Get("code"); code != "" {
+		data = []byte(strings.ReplaceAll(string(data), "{{.Code}}", code))
+	}
+	if msg := q.Get("msg"); msg != "" {
+		data = []byte(strings.ReplaceAll(string(data), "{{.Msg}}", msg))
+	}
+	if corr := q.Get("corr"); corr != "" {
+		data = []byte(strings.ReplaceAll(string(data), "{{.Corr}}", corr))
+	}
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	// The status code in the query string is just for display — the
-	// handler always returns 200 so the browser renders the page.
-	// Callers that need an HTTP-level status code should set it
-	// themselves (e.g. in the auth middleware).
 	_, _ = w.Write(data)
 }
 
