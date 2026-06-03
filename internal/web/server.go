@@ -82,6 +82,10 @@ type Server struct {
 	// path) so the sidebar can show session history.
 	chatSessions *chatSessionStore
 
+	// metrics holds the Prometheus metrics registry and handler.
+	// Set by NewServer; nil-safe in all instrumentation paths.
+	metrics *Metrics
+
 	mu        sync.Mutex
 	sessions  map[*ptySession]struct{}
 }
@@ -99,6 +103,7 @@ func NewServer(cfg Config) *Server {
 		upgrader:     websocket.Upgrader{CheckOrigin: func(r *http.Request) bool { return true }},
 		rateLimiter:  newRateLimiter(),
 		chatSessions: newChatSessionStore(),
+		metrics:      NewMetrics(),
 		sessions:     make(map[*ptySession]struct{}),
 	}
 }
@@ -151,7 +156,11 @@ func (s *Server) routes() http.Handler {
 	})
 	// Safe area insets visual test page for mobile development.
 	mux.HandleFunc("/safe-area-test", s.handleSafeAreaTest)
-	return loggingMiddleware(s.rateLimiter.middleware(securityHeadersMiddleware(basicAuthMiddleware(mux))))
+	// Prometheus metrics endpoint.
+	if s.metrics != nil {
+		mux.Handle("/metrics", s.metrics.Handler())
+	}
+	return s.metrics.middleware(loggingMiddleware(s.rateLimiter.middleware(securityHeadersMiddleware(basicAuthMiddleware(mux)))))
 }
 
 func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
@@ -263,7 +272,7 @@ func (s *Server) handleChatWS(w http.ResponseWriter, r *http.Request) {
 	sessionID := newSessionID()
 	s.chatSessions.create(sessionID)
 	ctx := r.Context()
-	runChatSession(ctx, conn, loop, sessionID, s.chatSessions)
+	runChatSession(ctx, conn, loop, sessionID, s.chatSessions, s.metrics)
 	conn.Close()
 }
 

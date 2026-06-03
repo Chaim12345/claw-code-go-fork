@@ -228,7 +228,7 @@ viewport with touch input, and gracefully scale up to desktop.
   Every WS connection gets a `slog.Logger` with `request_id`,
   `remote_addr`, `user_agent`. Log lifecycle events at INFO;
   protocol violations and rate-limit hits at WARN.
-- [ ] **Prometheus metrics** at `/metrics` (use the stdlib
+- [x] **Prometheus metrics** at `/metrics` (use the stdlib
   `expvar`-style handler or `github.com/prometheus/client_golang`).
   Expose at minimum:
     - `claw_web_sessions_total{provider,model}` (counter)

@@ -22,12 +22,18 @@ import (
 //
 // The store parameter (may be nil) is used to record session metadata
 // (user messages and assistant replies) for the sidebar history.
+// The m parameter (may be nil) is used to record Prometheus metrics.
 //
 // The function returns when either the websocket closes or ctx is
 // cancelled. The caller should close the websocket after this returns.
-func runChatSession(ctx context.Context, conn *websocket.Conn, loop *runtime.ConversationLoop, sessionID string, store *chatSessionStore) {
+func runChatSession(ctx context.Context, conn *websocket.Conn, loop *runtime.ConversationLoop, sessionID string, store *chatSessionStore, m *Metrics) {
 	logger := LoggerFromCtx(ctx).With(slog.String("session_id", sessionID))
 	logger.Info("chat_session_started")
+
+	// Record session start in metrics.
+	if m != nil {
+		m.SessionStarted("unknown", "unknown") // provider/model resolved at runtime by the loop
+	}
 
 	// Send the hello.
 	sendJSON(conn, logger, chatproto.ServerOutbound{
@@ -83,6 +89,16 @@ func runChatSession(ctx context.Context, conn *websocket.Conn, loop *runtime.Con
 			if store != nil && ev.Type == runtime.TurnEventTextFinal && ev.Text != "" {
 				store.recordAssistantReply(sessionID, ev.Text)
 			}
+			// Count the assistant message in metrics.
+			if m != nil && ev.Type == runtime.TurnEventTextFinal {
+				m.MessageCounted("assistant", "text")
+			}
+			if m != nil && ev.Type == runtime.TurnEventToolStart {
+				m.MessageCounted("assistant", "tool_call")
+			}
+			if m != nil && ev.Type == runtime.TurnEventToolDone {
+				m.MessageCounted("assistant", "tool_result")
+			}
 		}
 	}()
 
@@ -133,6 +149,10 @@ func runChatSession(ctx context.Context, conn *websocket.Conn, loop *runtime.Con
 			if store != nil {
 				store.recordUserMessage(sessionID, msg.Text)
 			}
+			// Count the user message in metrics.
+			if m != nil {
+				m.MessageCounted("user", "text")
+			}
 			select {
 			case msgCh <- msg.Text:
 			case <-ctx.Done():
@@ -157,6 +177,9 @@ func runChatSession(ctx context.Context, conn *websocket.Conn, loop *runtime.Con
 			})
 			writeMu.Unlock()
 		}
+	}
+	if m != nil {
+		m.SessionEnded()
 	}
 	logger.Info("chat_session_ended")
 }

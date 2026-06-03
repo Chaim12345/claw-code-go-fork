@@ -342,3 +342,63 @@ banner that guides users through this flow.
 
 - [Web protocol reference](./web-protocol.md) — structured chat API
 - [ROADMAP](../ROADMAP.md) — planned features and status
+
+---
+
+## Prometheus metrics
+
+The server exposes a `/metrics` endpoint in Prometheus text format
+for scraping by Prometheus, Grafana, or any OpenMetrics-compatible
+collector.
+
+### Available metrics
+
+| Metric | Type | Labels | Description |
+|---|---|---|---|
+| `claw_web_sessions_total` | counter | `provider`, `model` | Total chat sessions created |
+| `claw_web_active_sessions` | gauge | — | Currently active chat sessions |
+| `claw_web_messages_total` | counter | `role` (user\|assistant), `kind` (text\|tool_call\|tool_result) | Messages processed |
+| `claw_web_request_duration_seconds` | histogram | `method`, `path` | HTTP request duration (excludes WS upgrades) |
+| `claw_web_errors_total` | counter | `kind` (auth_failure\|rate_limit\|server_error\|client_error) | Errors by category |
+
+### Scraping configuration
+
+**Prometheus** (`prometheus.yml`):
+
+```yaml
+scrape_configs:
+  - job_name: claw-code-go
+    static_configs:
+      - targets: ['localhost:7777']
+    metrics_path: /metrics
+    # If CLAW_WEB_TOKEN is set, include it as a query param:
+    # params:
+    #   token: ['<your-token>']
+```
+
+**Grafana**: import a Prometheus dashboard and create panels from the
+metrics above. The `claw_web_request_duration_seconds` histogram is
+particularly useful for setting up RED (Rate, Errors, Duration)
+dashboards.
+
+### Example curl
+
+```bash
+# No auth
+curl -s http://localhost:7777/metrics | head -20
+
+# With bearer token
+curl -s -H "Authorization: Bearer $CLAW_WEB_TOKEN" http://localhost:7777/metrics | grep claw_web
+```
+
+Note: the `/metrics` endpoint is subject to the same auth middleware
+as the rest of the app. If `CLAW_WEB_AUTH` or `CLAW_WEB_TOKEN` is set,
+the scraper must authenticate (use `Authorization: Bearer <token>` or
+`?token=<token>` query parameter).
+
+---
+
+## Related documents
+
+- [Web protocol reference](./web-protocol.md) — structured chat API
+- [ROADMAP](../ROADMAP.md) — planned features and status
