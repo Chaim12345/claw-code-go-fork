@@ -17,6 +17,7 @@
     <button id="sidebar-toggle" aria-label="Toggle sidebar" title="Toggle sidebar">☰</button>
     <h1>claw-code-go</h1>
     <span id="connection-status" class="status-pill status-connected">connected</span>
+    <button id="shortcuts-toggle" aria-label="Keyboard shortcuts" title="Keyboard shortcuts (?)">?</button>
   </header>
 
   <div id="layout">
@@ -111,6 +112,28 @@
         });
     }
   </script>
+  <!-- Keyboard shortcuts overlay -->
+  <div id="shortcuts-overlay" class="shortcuts-overlay-hidden" role="dialog" aria-label="Keyboard shortcuts" aria-hidden="true">
+    <div class="shortcuts-backdrop"></div>
+    <div class="shortcuts-card">
+      <div class="shortcuts-header">
+        <h2>Keyboard Shortcuts</h2>
+        <button id="shortcuts-close" class="shortcuts-close-btn" aria-label="Close shortcuts">&times;</button>
+      </div>
+      <div class="shortcuts-body">
+        <table class="shortcuts-table">
+          <tbody>
+            <tr><td><kbd>Enter</kbd></td><td>Send message</td></tr>
+            <tr><td><kbd>Shift</kbd> + <kbd>Enter</kbd></td><td>Newline</td></tr>
+            <tr><td><kbd>?</kbd></td><td>Toggle this shortcuts menu</td></tr>
+            <tr><td><kbd>Escape</kbd></td><td>Close shortcuts / permission dialogs</td></tr>
+            <tr><td><kbd>/</kbd></td><td>Open slash command menu (in composer)</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
   <script src="/static/js/chat.js"></script>
 </body>
 </html>

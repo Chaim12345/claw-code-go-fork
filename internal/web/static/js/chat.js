@@ -549,5 +549,67 @@
 
   setupKeyboardHandling();
   sendButton.disabled = true;
+
+  // ── Keyboard shortcuts overlay ───────────────────────────
+  var shortcutsOverlay = document.getElementById('shortcuts-overlay');
+  var shortcutsToggle = document.getElementById('shortcuts-toggle');
+  var shortcutsClose  = document.getElementById('shortcuts-close');
+  var shortcutsBackdrop = shortcutsOverlay ? shortcutsOverlay.querySelector('.shortcuts-backdrop') : null;
+
+  function showShortcuts() {
+    if (!shortcutsOverlay) return;
+    shortcutsOverlay.classList.remove('shortcuts-overlay-hidden');
+    shortcutsOverlay.setAttribute('aria-hidden', 'false');
+    // Focus the close button for keyboard accessibility.
+    if (shortcutsClose) setTimeout(function () { shortcutsClose.focus(); }, 50);
+  }
+
+  function hideShortcuts() {
+    if (!shortcutsOverlay) return;
+    shortcutsOverlay.classList.add('shortcuts-overlay-hidden');
+    shortcutsOverlay.setAttribute('aria-hidden', 'true');
+    // Return focus to the composer.
+    composerInput.focus();
+  }
+
+  function toggleShortcuts() {
+    if (!shortcutsOverlay) return;
+    if (shortcutsOverlay.classList.contains('shortcuts-overlay-hidden')) {
+      showShortcuts();
+    } else {
+      hideShortcuts();
+    }
+  }
+
+  // "?" button in header (touch users).
+  if (shortcutsToggle) {
+    shortcutsToggle.addEventListener('click', toggleShortcuts);
+  }
+
+  // Close button inside the overlay.
+  if (shortcutsClose) {
+    shortcutsClose.addEventListener('click', hideShortcuts);
+  }
+
+  // Click backdrop to close.
+  if (shortcutsBackdrop) {
+    shortcutsBackdrop.addEventListener('click', hideShortcuts);
+  }
+
+  // Keyboard listeners.
+  document.addEventListener('keydown', function (e) {
+    // Toggle shortcuts overlay on "?" (but not when typing in composer).
+    if (e.key === '?' && !e.ctrlKey && !e.metaKey && !e.altKey && document.activeElement !== composerInput) {
+      e.preventDefault();
+      toggleShortcuts();
+      return;
+    }
+    // Close shortcuts on Escape.
+    if (e.key === 'Escape' && shortcutsOverlay && !shortcutsOverlay.classList.contains('shortcuts-overlay-hidden')) {
+      e.preventDefault();
+      hideShortcuts();
+    }
+  });
+
   connect();
 })();

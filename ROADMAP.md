@@ -249,7 +249,7 @@ viewport with touch input, and gracefully scale up to desktop.
 
 ## Phase 6 — Polish & docs
 
-- [ ] **Keyboard shortcuts overlay** (`?` to toggle, lists all
+- [x] **Keyboard shortcuts overlay** (`?` to toggle, lists all
   shortcuts). Touch users get a "?" button in the header.
 - [ ] **Theme switcher** with 3 options (system, light, dark),
   persisted per-device.
