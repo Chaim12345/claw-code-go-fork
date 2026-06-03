@@ -178,7 +178,7 @@ viewport with touch input, and gracefully scale up to desktop.
   collapsible cards showing the tool name, a one-line summary of
   the input, and a `<details>` block with the result. Card has
   a small icon, a duration timer, and a copy button.
-- [ ] **Permission prompts** as proper modal-style dialogs (not
+- [x] **Permission prompts** as proper modal-style dialogs (not
   text prompts): centered card with the tool name, a formatted view
   of the input, and three buttons: Allow once / Always allow / Deny.
   Send the corresponding `permission_reply` over the WS. On mobile

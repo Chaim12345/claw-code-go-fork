@@ -379,6 +379,145 @@ footer {
   border-radius: 3px;
 }
 
+/* === Permission prompts (modal / bottom sheet) === */
+.perm-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  background: rgba(0, 0, 0, 0.45);
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  animation: perm-fade-in 0.2s ease;
+}
+@keyframes perm-fade-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+.perm-card {
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+  width: 100%;
+  max-width: 480px;
+  padding: var(--space-xl);
+  padding-bottom: calc(var(--space-xl) + env(safe-area-inset-bottom));
+  box-shadow: 0 -4px 24px rgba(0, 0, 0, 0.18);
+  animation: perm-slide-up 0.25s ease;
+  max-height: 70vh;
+  overflow-y: auto;
+}
+@keyframes perm-slide-up {
+  from { transform: translateY(30%); }
+  to   { transform: translateY(0); }
+}
+
+.perm-card h3 {
+  font-size: var(--text-lg);
+  font-weight: 600;
+  margin-bottom: var(--space-md);
+  color: var(--color-text);
+}
+
+.perm-tool-name {
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--color-primary);
+  background: var(--color-surface);
+  padding: var(--space-sm) var(--space-md);
+  border-radius: var(--radius-sm);
+  margin-bottom: var(--space-md);
+  display: inline-block;
+}
+
+.perm-input {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  padding: var(--space-md);
+  margin-bottom: var(--space-lg);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: var(--color-text);
+  max-height: 200px;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+.perm-actions {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+}
+
+.perm-btn {
+  padding: var(--space-md) var(--space-lg);
+  border: none;
+  border-radius: var(--radius-md);
+  font-family: var(--font-sans);
+  font-size: var(--text-base);
+  font-weight: 500;
+  cursor: pointer;
+  min-height: 44px;
+  transition: background 0.15s, transform 0.1s;
+  -webkit-tap-highlight-color: transparent;
+}
+.perm-btn:active {
+  transform: scale(0.97);
+}
+
+.perm-allow-once {
+  background: var(--color-primary);
+  color: #fff;
+}
+.perm-allow-once:hover {
+  background: var(--color-primary-hover);
+}
+
+.perm-allow-always {
+  background: var(--color-accent);
+  color: #fff;
+}
+.perm-allow-always:hover {
+  background: #059669;
+}
+
+.perm-deny {
+  background: transparent;
+  color: var(--color-text-muted);
+  border: 1px solid var(--color-border);
+}
+.perm-deny:hover {
+  background: var(--color-surface);
+}
+
+/* Desktop: centered card instead of bottom sheet */
+@media (min-width: 768px) {
+  .perm-overlay {
+    align-items: center;
+  }
+  .perm-card {
+    border-radius: var(--radius-lg);
+    padding-bottom: var(--space-xl);
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.25);
+    max-height: 80vh;
+  }
+  @keyframes perm-slide-up {
+    from { transform: translateY(10%); opacity: 0.7; }
+    to   { transform: translateY(0);   opacity: 1; }
+  }
+  .perm-actions {
+    flex-direction: row-reverse;
+    justify-content: flex-start;
+  }
+  .perm-deny {
+    margin-right: auto;
+  }
+}
+
 /* === Tool-call cards === */
 .tool-summary {
   display: flex;

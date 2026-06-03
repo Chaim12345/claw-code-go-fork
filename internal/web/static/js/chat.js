@@ -1,13 +1,12 @@
 /**
  * claw-code-go chat UI — client-side JavaScript
  * Mobile-first, vanilla JS. Handles WebSocket connection,
- * message rendering, virtual keyboard, tool-call cards.
+ * message rendering, virtual keyboard, tool cards, permissions.
  */
 
 (function () {
   'use strict';
 
-  // ── DOM refs ──────────────────────────────────────────────
   var composer       = document.getElementById('composer');
   var composerInput  = document.getElementById('composer-input');
   var sendButton     = document.getElementById('send-button');
@@ -16,32 +15,24 @@
   var sidebarToggle  = document.getElementById('sidebar-toggle');
   var sidebar        = document.getElementById('sidebar');
 
-  // ── State ─────────────────────────────────────────────────
   var ws = null;
   var reconnectTimer = null;
   var reconnectDelay = 1000;
   var MAX_RECONNECT_DELAY = 30000;
   var currentBubble = null;
   var currentBubbleContent = '';
-  var toolStartTime = null;     // timestamp when tool_start fired
-  var pendingToolCard = null;   // DOM element for current tool card
+  var toolStartTime = null;
+  var pendingToolCard = null;
 
-  // ── Visual Viewport (virtual keyboard) handling ───────────
+  // ── Visual Viewport ──────────────────────────────────────
   function handleViewportResize() {
     if (!window.visualViewport) return;
-    var viewport = window.visualViewport;
-    var keyboardHeight = window.innerHeight - viewport.height;
-    if (keyboardHeight > 100) {
-      composer.style.paddingBottom = (keyboardHeight + 8) + 'px';
-      scrollToBottom();
-    } else {
-      composer.style.paddingBottom = '';
-    }
-    if (viewport.offsetTop > 0) {
-      messagesEl.scrollTop += viewport.offsetTop;
-    }
+    var vp = window.visualViewport;
+    var kh = window.innerHeight - vp.height;
+    if (kh > 100) { composer.style.paddingBottom = (kh + 8) + 'px'; scrollToBottom(); }
+    else { composer.style.paddingBottom = ''; }
+    if (vp.offsetTop > 0) messagesEl.scrollTop += vp.offsetTop;
   }
-
   function setupKeyboardHandling() {
     if (window.visualViewport) {
       window.visualViewport.addEventListener('resize', handleViewportResize);
@@ -49,17 +40,15 @@
     }
   }
 
-  // ── Composer auto-grow ────────────────────────────────────
+  // ── Composer ─────────────────────────────────────────────
   composerInput.addEventListener('input', function () {
     this.style.height = 'auto';
-    var lineHeight = parseFloat(getComputedStyle(this).lineHeight) || 24;
-    var maxHeight = lineHeight * 8;
-    this.style.height = Math.min(this.scrollHeight, maxHeight) + 'px';
+    var lh = parseFloat(getComputedStyle(this).lineHeight) || 24;
+    this.style.height = Math.min(this.scrollHeight, lh * 8) + 'px';
     sendButton.disabled = this.value.trim().length === 0;
     if (window.visualViewport) handleViewportResize();
   });
 
-  // ── Form submit ───────────────────────────────────────────
   composer.addEventListener('submit', function (e) {
     e.preventDefault();
     var text = composerInput.value.trim();
@@ -73,7 +62,7 @@
     scrollToBottom();
   });
 
-  // ── Message rendering with delta grouping ─────────────────
+  // ── Message rendering ────────────────────────────────────
   function appendMessage(role, html) {
     var wrapper = document.createElement('div');
     wrapper.className = 'message message-' + role;
@@ -104,7 +93,7 @@
     }
   }
 
-  // ── Tool-call cards ───────────────────────────────────────
+  // ── Tool-call cards ──────────────────────────────────────
   function createToolCard(toolName, inputSummary) {
     var card = document.createElement('div');
     card.className = 'message message-tool';
@@ -114,7 +103,7 @@
 
     var icon = document.createElement('span');
     icon.className = 'tool-icon';
-    icon.textContent = '\u2699'; // gear icon
+    icon.textContent = '\u2699';
     summary.appendChild(icon);
 
     var nameEl = document.createElement('strong');
@@ -132,10 +121,8 @@
     timer.className = 'tool-timer';
     timer.textContent = '0.0s';
     summary.appendChild(timer);
-
     card.appendChild(summary);
 
-    // Collapsible details block
     var details = document.createElement('details');
     details.className = 'tool-details';
     var dtSummary = document.createElement('summary');
@@ -149,21 +136,16 @@
     pre.appendChild(code);
     details.appendChild(pre);
 
-    // Copy button
     var copyBtn = document.createElement('button');
     copyBtn.className = 'tool-copy-btn';
     copyBtn.textContent = 'Copy';
-    copyBtn.title = 'Copy output to clipboard';
     copyBtn.addEventListener('click', function () {
       navigator.clipboard.writeText(code.textContent).then(function () {
         copyBtn.textContent = 'Copied!';
         setTimeout(function () { copyBtn.textContent = 'Copy'; }, 2000);
-      }).catch(function () {
-        copyBtn.textContent = 'Error';
-      });
+      }).catch(function () { copyBtn.textContent = 'Error'; });
     });
     details.appendChild(copyBtn);
-
     card.appendChild(details);
     messagesEl.appendChild(card);
 
@@ -175,16 +157,12 @@
     toolStartTime = Date.now();
     var result = createToolCard(toolName, inputSummary);
     pendingToolCard = result;
-
-    // Update timer every 100ms
     var updateTimer = function () {
       if (pendingToolCard !== result) return;
       var elapsed = ((Date.now() - toolStartTime) / 1000).toFixed(1);
       result.timer.textContent = elapsed + 's';
       if (pendingToolCard === result) {
-        requestAnimationFrame(function () {
-          setTimeout(updateTimer, 100);
-        });
+        requestAnimationFrame(function () { setTimeout(updateTimer, 100); });
       }
     };
     updateTimer();
@@ -193,13 +171,76 @@
   function finishToolCard(output) {
     if (pendingToolCard) {
       pendingToolCard.code.textContent = String(output || '').substring(0, 2000);
-      // Stop timer updates by clearing pendingToolCard
       pendingToolCard = null;
       toolStartTime = null;
     }
   }
 
-  // ── Markdown renderer ─────────────────────────────────────
+  // ── Permission prompts ───────────────────────────────────
+  function showPermissionDialog(msg) {
+    finalizeAssistantBubble();
+
+    var overlay = document.createElement('div');
+    overlay.className = 'perm-overlay';
+
+    var card = document.createElement('div');
+    card.className = 'perm-card';
+
+    var title = document.createElement('h3');
+    title.textContent = 'Permission Request';
+    card.appendChild(title);
+
+    var toolName = document.createElement('div');
+    toolName.className = 'perm-tool-name';
+    toolName.textContent = escapeHtml(msg.tool_name || 'unknown tool');
+    card.appendChild(toolName);
+
+    if (msg.tool_input) {
+      var input = document.createElement('pre');
+      input.className = 'perm-input';
+      input.textContent = escapeHtml(String(msg.tool_input).substring(0, 500));
+      card.appendChild(input);
+    }
+
+    var actions = document.createElement('div');
+    actions.className = 'perm-actions';
+
+    function reply(decision) {
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({
+          type: 'permission_reply',
+          tool_use_id: msg.tool_use_id || '',
+          decision: decision
+        }));
+      }
+      overlay.remove();
+    }
+
+    var allowOnce = document.createElement('button');
+    allowOnce.className = 'perm-btn perm-allow-once';
+    allowOnce.textContent = 'Allow once';
+    allowOnce.addEventListener('click', function () { reply('allow'); });
+
+    var allowAlways = document.createElement('button');
+    allowAlways.className = 'perm-btn perm-allow-always';
+    allowAlways.textContent = 'Always allow';
+    allowAlways.addEventListener('click', function () { reply('allow_always'); });
+
+    var denyBtn = document.createElement('button');
+    denyBtn.className = 'perm-btn perm-deny';
+    denyBtn.textContent = 'Deny';
+    denyBtn.addEventListener('click', function () { reply('deny'); });
+
+    actions.appendChild(allowOnce);
+    actions.appendChild(allowAlways);
+    actions.appendChild(denyBtn);
+    card.appendChild(actions);
+
+    overlay.appendChild(card);
+    document.body.appendChild(overlay);
+  }
+
+  // ── Markdown renderer ────────────────────────────────────
   function renderMarkdown(text) {
     var escaped = escapeHtml(text);
     escaped = escaped.replace(/```(\w+)?\n([\s\S]*?)```/g, function (match, lang, code) {
@@ -225,7 +266,7 @@
     });
   }
 
-  // ── Connection management ─────────────────────────────────
+  // ── Connection ───────────────────────────────────────────
   function connect() {
     var protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     var wsURL = protocol + '//' + window.location.host + '/api/chat/ws';
@@ -245,33 +286,20 @@
       try {
         var msg = JSON.parse(event.data);
         switch (msg.type) {
-          case 'chat_session_init':
-            break;
-          case 'text_delta':
-            appendDelta(msg.text || '');
-            break;
-          case 'text_final':
-            finalizeAssistantBubble();
-            break;
-          case 'tool_start':
-            startToolCard(msg.tool_name, msg.input_summary || '');
-            break;
-          case 'tool_done':
-            finishToolCard(msg.output || '');
-            break;
+          case 'chat_session_init': break;
+          case 'text_delta':  appendDelta(msg.text || ''); break;
+          case 'text_final':  finalizeAssistantBubble(); break;
+          case 'tool_start':  startToolCard(msg.tool_name, msg.input_summary || ''); break;
+          case 'tool_done':   finishToolCard(msg.output || ''); break;
+          case 'permission_ask': showPermissionDialog(msg); break;
           case 'error':
             finalizeAssistantBubble();
             appendMessage('error', 'Error: ' + escapeHtml(msg.error || 'unknown'));
             break;
-          case 'done':
-            finalizeAssistantBubble();
-            break;
-          default:
-            break;
+          case 'done': finalizeAssistantBubble(); break;
+          default: break;
         }
-      } catch (err) {
-        // ignore non-JSON
-      }
+      } catch (err) { /* ignore non-JSON */ }
     };
 
     ws.onclose = function () { setStatus('disconnected'); scheduleReconnect(); };
@@ -293,12 +321,10 @@
     statusPill.textContent = state;
   }
 
-  // ── Sidebar toggle ────────────────────────────────────────
   sidebarToggle.addEventListener('click', function () {
     sidebar.classList.toggle('sidebar-open');
   });
 
-  // ── Init ──────────────────────────────────────────────────
   setupKeyboardHandling();
   sendButton.disabled = true;
   connect();
