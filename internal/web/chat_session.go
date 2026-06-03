@@ -6,7 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"os"
+	"log/slog"
 	"sync"
 
 	"github.com/gorilla/websocket"
@@ -26,8 +26,11 @@ import (
 // The function returns when either the websocket closes or ctx is
 // cancelled. The caller should close the websocket after this returns.
 func runChatSession(ctx context.Context, conn *websocket.Conn, loop *runtime.ConversationLoop, sessionID string, store *chatSessionStore) {
+	logger := LoggerFromCtx(ctx).With(slog.String("session_id", sessionID))
+	logger.Info("chat_session_started")
+
 	// Send the hello.
-	sendJSON(conn, chatproto.ServerOutbound{
+	sendJSON(conn, logger, chatproto.ServerOutbound{
 		Type:      chatproto.MsgChatSessionInit,
 		SessionID: sessionID,
 	})
@@ -63,7 +66,7 @@ func runChatSession(ctx context.Context, conn *websocket.Conn, loop *runtime.Con
 					// pushed into turnEvents by SendMessageStreaming.
 					// Just log and continue so the client can send
 					// another message.
-					fmt.Fprintf(os.Stderr, "[web/chat] turn error: %v\n", err)
+					logger.Warn("turn_error", "error", err)
 				}
 			}
 		}
@@ -74,7 +77,7 @@ func runChatSession(ctx context.Context, conn *websocket.Conn, loop *runtime.Con
 		for ev := range turnEvents {
 			out := turnEventToOutbound(ev)
 			writeMu.Lock()
-			sendJSON(conn, out)
+			sendJSON(conn, logger, out)
 			writeMu.Unlock()
 			// Record assistant replies for sidebar history.
 			if store != nil && ev.Type == runtime.TurnEventTextFinal && ev.Text != "" {
@@ -92,8 +95,9 @@ func runChatSession(ctx context.Context, conn *websocket.Conn, loop *runtime.Con
 		}
 		var msg chatproto.ClientInbound
 		if err := json.Unmarshal(data, &msg); err != nil {
+			logger.Warn("parse_error", "error", err)
 			writeMu.Lock()
-			sendJSON(conn, chatproto.ServerOutbound{
+			sendJSON(conn, logger, chatproto.ServerOutbound{
 				Type:    chatproto.MsgError,
 				Code:    "parse_error",
 				Message: fmt.Sprintf("invalid JSON: %v", err),
@@ -105,8 +109,9 @@ func runChatSession(ctx context.Context, conn *websocket.Conn, loop *runtime.Con
 		switch msg.Type {
 		case chatproto.MsgUserInput:
 			if msg.Text == "" {
+				logger.Warn("protocol_violation", "reason", "empty user_input")
 				writeMu.Lock()
-				sendJSON(conn, chatproto.ServerOutbound{
+				sendJSON(conn, logger, chatproto.ServerOutbound{
 					Type:    chatproto.MsgError,
 					Code:    "invalid_message",
 					Message: "user_input requires a non-empty text field",
@@ -118,7 +123,7 @@ func runChatSession(ctx context.Context, conn *websocket.Conn, loop *runtime.Con
 			// This allows the client to avoid resending on reconnect.
 			if msg.MessageID != "" {
 				writeMu.Lock()
-				sendJSON(conn, chatproto.ServerOutbound{
+				sendJSON(conn, logger, chatproto.ServerOutbound{
 					Type:      chatproto.MsgAck,
 					MessageID: msg.MessageID,
 				})
@@ -135,30 +140,25 @@ func runChatSession(ctx context.Context, conn *websocket.Conn, loop *runtime.Con
 			}
 
 		case chatproto.MsgPermissionReply:
-			// Permission replies are handled inside
-			// runOneTurnStreaming via the PermReply channel on
-			// TurnEventPermissionAsk. The web chat session doesn't
-			// currently expose this via JSON because
-			// TurnEventPermissionAsk's PermReply channel is runtime
-			// package internal. This will be wired when Phase 3's
-			// permission prompt UI is implemented.
+			logger.Warn("protocol_violation", "reason", "permission_reply not yet supported")
 			writeMu.Lock()
-			sendJSON(conn, chatproto.ServerOutbound{
+			sendJSON(conn, logger, chatproto.ServerOutbound{
 				Type:    chatproto.MsgWarn,
 				Message: "permission_reply not yet supported via chat API; use /terminal for permission prompts",
 			})
 			writeMu.Unlock()
 
 		default:
-			// Unknown message type; ignore silently
+			logger.Warn("protocol_violation", "reason", "unknown message type", "msg_type", msg.Type)
 			writeMu.Lock()
-			sendJSON(conn, chatproto.ServerOutbound{
+			sendJSON(conn, logger, chatproto.ServerOutbound{
 				Type:    chatproto.MsgWarn,
 				Message: fmt.Sprintf("unknown message type: %s", msg.Type),
 			})
 			writeMu.Unlock()
 		}
 	}
+	logger.Info("chat_session_ended")
 }
 
 // turnEventToOutbound converts a runtime.TurnEvent to a chatproto.ServerOutbound.
@@ -228,17 +228,17 @@ func turnEventToOutbound(ev runtime.TurnEvent) chatproto.ServerOutbound {
 }
 
 // sendJSON marshals msg and writes it as a TextMessage to the
-// websocket. Errors are logged to stderr.
-func sendJSON(conn *websocket.Conn, msg chatproto.ServerOutbound) {
+// websocket. Errors are logged using the provided logger.
+func sendJSON(conn *websocket.Conn, logger *slog.Logger, msg chatproto.ServerOutbound) {
 	if msg.Type == "" {
 		return // skip empty default messages
 	}
 	data, err := json.Marshal(msg)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "[web/chat] marshal: %v\n", err)
+		logger.Warn("marshal_error", "error", err)
 		return
 	}
 	if err := conn.WriteMessage(websocket.TextMessage, data); err != nil {
-		fmt.Fprintf(os.Stderr, "[web/chat] write: %v\n", err)
+		logger.Warn("websocket_write_error", "error", err)
 	}
 }

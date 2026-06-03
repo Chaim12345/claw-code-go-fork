@@ -224,7 +224,7 @@ viewport with touch input, and gracefully scale up to desktop.
 
 ## Phase 5 — Observability
 
-- [ ] **Structured logs** via `log/slog` (stdlib in Go 1.21+).
+- [x] **Structured logs** via `log/slog` (stdlib in Go 1.21+).
   Every WS connection gets a `slog.Logger` with `request_id`,
   `remote_addr`, `user_agent`. Log lifecycle events at INFO;
   protocol violations and rate-limit hits at WARN.

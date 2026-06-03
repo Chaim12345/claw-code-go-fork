@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"log/slog"
 	"mime"
 	"net/http"
 	"os"
@@ -120,7 +121,7 @@ func (s *Server) ListenAndServe(ctx context.Context) error {
 		s.killAll()
 	}()
 
-	fmt.Fprintf(os.Stderr, "[web] listening on http://%s\n", s.cfg.Addr)
+	slog.Info("server_start", "addr", s.cfg.Addr)
 	if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		return err
 	}
@@ -150,7 +151,7 @@ func (s *Server) routes() http.Handler {
 	})
 	// Safe area insets visual test page for mobile development.
 	mux.HandleFunc("/safe-area-test", s.handleSafeAreaTest)
-	return s.rateLimiter.middleware(securityHeadersMiddleware(basicAuthMiddleware(mux)))
+	return loggingMiddleware(s.rateLimiter.middleware(securityHeadersMiddleware(basicAuthMiddleware(mux))))
 }
 
 func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
@@ -186,7 +187,7 @@ func (s *Server) handleSafeAreaTest(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 	conn, err := s.upgrader.Upgrade(w, r, nil)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "[web] ws upgrade: %v\n", err)
+		LoggerFromCtx(r.Context()).Warn("ws_upgrade_failed", "error", err)
 		return
 	}
 	conn.SetReadLimit(64 * 1024) // 64 KiB; PTY input bursts are small
@@ -212,7 +213,7 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 			}
 			if err != nil {
 				if !errors.Is(err, io.EOF) {
-					fmt.Fprintf(os.Stderr, "[web] pty read: %v\n", err)
+					LoggerFromCtx(r.Context()).Warn("pty_read_error", "error", err)
 				}
 				return
 			}
@@ -230,13 +231,13 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 		if mt == websocket.TextMessage && len(data) > 0 && data[0] == '{' {
 			if handled, rerr := sess.handleControlMessage(data); handled {
 				if rerr != nil {
-					fmt.Fprintf(os.Stderr, "[web] control: %v\n", rerr)
+					LoggerFromCtx(r.Context()).Warn("control_message_error", "error", rerr)
 				}
 				continue
 			}
 		}
 		if _, err := sess.ptmx.Write(data); err != nil {
-			fmt.Fprintf(os.Stderr, "[web] pty write: %v\n", err)
+			LoggerFromCtx(r.Context()).Warn("pty_write_error", "error", err)
 			break
 		}
 	}
@@ -255,7 +256,7 @@ func (s *Server) handleChatWS(w http.ResponseWriter, r *http.Request) {
 	}
 	conn, err := s.upgrader.Upgrade(w, r, nil)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "[web] chat ws upgrade: %v\n", err)
+		LoggerFromCtx(r.Context()).Warn("chat_ws_upgrade_failed", "error", err)
 		return
 	}
 	loop := s.ChatLoopFactory()

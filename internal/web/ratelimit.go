@@ -177,6 +177,7 @@ func (rl *rateLimiter) middleware(next http.Handler) http.Handler {
 		}
 		ip := extractIP(r)
 		if !rl.AllowSession(ip) {
+			LoggerFromCtx(r.Context()).Warn("rate_limit_exceeded", "ip", ip, "path", r.URL.Path)
 			http.Error(w, "rate limit exceeded; try again later", http.StatusTooManyRequests)
 			return
 		}
