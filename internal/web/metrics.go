@@ -165,6 +165,8 @@ func routePattern(path string) string {
 		return "/api/sessions"
 	case path == "/safe-area-test":
 		return "/safe-area-test"
+	case path == "/error":
+		return "/error"
 	case len(path) > 8 && path[:8] == "/static/":
 		return "/static/*"
 	default:

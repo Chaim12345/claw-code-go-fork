@@ -237,7 +237,7 @@ viewport with touch input, and gracefully scale up to desktop.
     - `claw_web_request_duration_seconds` (histogram)
     - `claw_web_errors_total{kind}` (counter)
   Document the metrics in `docs/web-deployment.md`.
-- [ ] **Error page** at `/error?code=...&msg=...` rendered when the
+- [x] **Error page** at `/error?code=...&msg=...` rendered when the
   server fails to set up a session (e.g. provider down). Friendly
   UI, copy-paste correlation id.
 - [ ] **Health check enrichment**: `/healthz` returns JSON with

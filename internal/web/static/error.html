@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#dc2626">
+<title>Error — claw-code-go</title>
+<style>
+  :root {
+    --bg: #fef2f2;
+    --fg: #1f2937;
+    --accent: #dc2626;
+    --card-bg: #ffffff;
+    --border: #fecaca;
+    --muted: #6b7280;
+    --code-bg: #f3f4f6;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #1c1917;
+      --fg: #fafaf9;
+      --accent: #f87171;
+      --card-bg: #292524;
+      --border: #44403c;
+      --muted: #a8a29e;
+      --code-bg: #1c1917;
+    }
+  }
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background: var(--bg);
+    color: var(--fg);
+    min-height: 100dvh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 16px;
+  }
+  .card {
+    background: var(--card-bg);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 32px 24px;
+    max-width: 480px;
+    width: 100%;
+    text-align: center;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+  }
+  .icon { font-size: 48px; margin-bottom: 16px; }
+  h1 { font-size: clamp(1.25rem, 4vw, 1.5rem); margin-bottom: 8px; }
+  .code { font-size: 0.875rem; color: var(--muted); margin-bottom: 12px; }
+  .message {
+    font-size: 1rem;
+    line-height: 1.6;
+    margin-bottom: 20px;
+    color: var(--fg);
+    word-break: break-word;
+  }
+  .correlation {
+    background: var(--code-bg);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 12px;
+    font-family: "SF Mono", "Fira Code", "Fira Mono", monospace;
+    font-size: 0.8125rem;
+    word-break: break-all;
+    margin-bottom: 20px;
+    user-select: all;
+    -webkit-user-select: all;
+    color: var(--fg);
+  }
+  .correlation-label {
+    display: block;
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--muted);
+    margin-bottom: 4px;
+  }
+  .actions {
+    display: flex;
+    gap: 8px;
+    justify-content: center;
+    flex-wrap: wrap;
+  }
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 10px 20px;
+    border-radius: 8px;
+    font-size: 0.9375rem;
+    font-weight: 500;
+    text-decoration: none;
+    cursor: pointer;
+    border: 1px solid var(--border);
+    background: var(--card-bg);
+    color: var(--fg);
+    transition: background 0.15s, border-color 0.15s;
+    -webkit-tap-highlight-color: transparent;
+    min-height: 44px;
+  }
+  .btn:hover { background: var(--bg); }
+  .btn:active { transform: scale(0.97); }
+  .btn-primary {
+    background: var(--accent);
+    color: #fff;
+    border-color: var(--accent);
+  }
+  .btn-primary:hover { filter: brightness(1.1); }
+</style>
+</head>
+<body>
+<div class="card">
+  <div class="icon">&#9888;&#65039;</div>
+  <h1 id="error-title">Something went wrong</h1>
+  <p class="code" id="error-code"></p>
+  <p class="message" id="error-message"></p>
+  <div class="correlation" id="correlation-block" hidden>
+    <span class="correlation-label">Correlation ID</span>
+    <span id="correlation-id"></span>
+  </div>
+  <div class="actions">
+    <a href="/" class="btn btn-primary">&#8592; Back to Chat</a>
+    <button class="btn" id="copy-correlation" hidden>Copy ID</button>
+  </div>
+</div>
+
+<script>
+(function() {
+  const params = new URLSearchParams(window.location.search);
+  const code = params.get('code') || '500';
+  const message = params.get('msg') || 'An unexpected error occurred.';
+  const corrId = params.get('corr') || '';
+
+  // Update title based on code
+  const titles = {
+    '400': 'Bad Request',
+    '401': 'Unauthorized',
+    '403': 'Forbidden',
+    '404': 'Not Found',
+    '429': 'Too Many Requests',
+    '500': 'Internal Server Error',
+    '502': 'Provider Unavailable',
+    '503': 'Service Unavailable',
+    '504': 'Provider Timeout',
+  };
+  document.getElementById('error-title').textContent = titles[code] || 'Error ' + code;
+  document.getElementById('error-code').textContent = 'HTTP ' + code;
+  document.getElementById('error-message').textContent = decodeURIComponent(message);
+
+  if (corrId) {
+    document.getElementById('correlation-block').hidden = false;
+    document.getElementById('correlation-id').textContent = corrId;
+    document.getElementById('copy-correlation').hidden = false;
+
+    document.getElementById('copy-correlation').addEventListener('click', function() {
+      navigator.clipboard.writeText(corrId).then(function() {
+        var btn = document.getElementById('copy-correlation');
+        btn.textContent = 'Copied!';
+        setTimeout(function() { btn.textContent = 'Copy ID'; }, 2000);
+      });
+    });
+  }
+})();
+</script>
+</body>
+</html>

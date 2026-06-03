@@ -23,8 +23,10 @@ import (
 	"log/slog"
 	"mime"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -156,6 +158,7 @@ func (s *Server) routes() http.Handler {
 	})
 	// Safe area insets visual test page for mobile development.
 	mux.HandleFunc("/safe-area-test", s.handleSafeAreaTest)
+	mux.HandleFunc("/error", s.handleError)
 	// Prometheus metrics endpoint.
 	if s.metrics != nil {
 		mux.Handle("/metrics", s.metrics.Handler())
@@ -189,6 +192,42 @@ func (s *Server) handleSafeAreaTest(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	_, _ = w.Write(data)
+}
+
+// handleError serves the friendly error page at /error. Query params:
+//
+//	code — HTTP status code (e.g. 502, 503)
+//	msg  — human-readable error description
+//	corr — correlation ID for copy-paste debugging
+func (s *Server) handleError(w http.ResponseWriter, r *http.Request) {
+	data, err := staticFS.ReadFile("static/error.html")
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	// The status code in the query string is just for display — the
+	// handler always returns 200 so the browser renders the page.
+	// Callers that need an HTTP-level status code should set it
+	// themselves (e.g. in the auth middleware).
+	_, _ = w.Write(data)
+}
+
+// RedirectToError builds a redirect URL to /error with the given
+// parameters and writes an HTTP redirect response. Use this from
+// any handler that wants to show the friendly error page instead
+// of a plain-text error.
+func RedirectToError(w http.ResponseWriter, r *http.Request, code int, msg, corr string) {
+	q := url.Values{}
+	q.Set("code", strconv.Itoa(code))
+	if msg != "" {
+		q.Set("msg", msg)
+	}
+	if corr != "" {
+		q.Set("corr", corr)
+	}
+	http.Redirect(w, r, "/error?"+q.Encode(), http.StatusSeeOther)
 }
 
 // handleWS upgrades the HTTP request to a WebSocket, spawns a PTY
