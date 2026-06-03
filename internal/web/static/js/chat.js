@@ -77,6 +77,55 @@
     themeToggle.addEventListener('click', cycleTheme);
   }
 
+  // ── Font size control (S / M / L) ────────────────────────
+  var fontSizeToggle = document.getElementById('font-size-toggle');
+  var FONT_SIZE_KEY  = 'claw_font_size';
+  var FONT_SIZE_CYCLE = ['s', 'm', 'l'];
+
+  function getCurrentFontSize() {
+    return document.documentElement.getAttribute('data-font-size') || 'm';
+  }
+
+  function applyFontSize(size) {
+    if (size === 'm') {
+      document.documentElement.removeAttribute('data-font-size');
+    } else {
+      document.documentElement.setAttribute('data-font-size', size);
+    }
+    localStorage.setItem(FONT_SIZE_KEY, size);
+    updateFontSizeToggleLabel(size);
+  }
+
+  function updateFontSizeToggleLabel(size) {
+    if (!fontSizeToggle) return;
+    var labels = { s: 'S', m: 'M', l: 'L' };
+    fontSizeToggle.textContent = labels[size] || 'A';
+    fontSizeToggle.style.fontWeight = size === 'l' ? '700' : '500';
+    fontSizeToggle.style.fontSize = size === 's' ? '0.7rem' : size === 'l' ? '0.95rem' : '0.85rem';
+  }
+
+  function cycleFontSize() {
+    var current = getCurrentFontSize();
+    var idx = FONT_SIZE_CYCLE.indexOf(current);
+    var next = FONT_SIZE_CYCLE[(idx + 1) % FONT_SIZE_CYCLE.length];
+    applyFontSize(next);
+  }
+
+  // Restore persisted font size on load.
+  (function () {
+    var saved = localStorage.getItem(FONT_SIZE_KEY);
+    if (saved === 's' || saved === 'l') {
+      applyFontSize(saved);
+    } else {
+      // Default: medium (no attribute)
+      updateFontSizeToggleLabel('m');
+    }
+  })();
+
+  if (fontSizeToggle) {
+    fontSizeToggle.addEventListener('click', cycleFontSize);
+  }
+
   // ── UUID generation (for message dedup) ──────────────────
   function generateUUID() {
     // crypto.randomUUID() is available in all modern browsers.
