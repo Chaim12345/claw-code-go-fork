@@ -26,6 +26,7 @@
     "test:e2e:update": "rm -f web/e2e/baselines/*.png && npx playwright test --config web/e2e/playwright.config.ts web/e2e/mobile.spec.ts || true"
   },
   "devDependencies": {
+    "@lhci/cli": "^0.14.0",
     "@playwright/test": "^1.52.0",
     "eslint": "^10.4.1",
     "html-validate": "^11.5.0"

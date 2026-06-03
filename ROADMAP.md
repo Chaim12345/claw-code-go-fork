@@ -324,7 +324,7 @@ cover but the research showed are important.
 
 ### Phase 7 additions — Tests & CI
 
-- [ ] **PWA installability audit**: add a `web/lighthouse` Makefile
+- [x] **PWA installability audit**: add a `web/lighthouse` Makefile
   target that runs Lighthouse (or `@lhci/cli`) against a running
   server and asserts PWA installability score ≥ 90. Document in
   `docs/web-deployment.md`.

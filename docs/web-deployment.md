@@ -396,6 +396,72 @@ The visual regression suite covers:
 
 ---
 
+---
+
+## PWA installability audit (Lighthouse CI)
+
+The project includes an automated Lighthouse CI target that audits the
+chat UI for PWA installability and asserts a score ≥ 90. This catches
+regressions in the manifest, service worker, or security headers that
+would block PWA installation.
+
+### Prerequisites
+
+```bash
+npm ci                          # install deps including @lhci/cli
+npx playwright install chromium # LHCI reuses the Playwright Chromium
+./claw-code-go web --addr 127.0.0.1:7777  # start the server
+```
+
+### Running the audit
+
+```bash
+# Run Lighthouse against a running server and assert PWA score ≥ 90
+make web/lighthouse
+
+# Or override the server URL
+LIGHTHOUSE_BASE_URL=http://192.168.1.50:7777 make web/lighthouse
+
+# CI-friendly variant (server mode with explicit collect + assert steps)
+make web/lighthouse-server
+```
+
+### What it checks
+
+The `.lighthouserc.json` config file asserts:
+
+- **PWA category score ≥ 0.9** (90%). This covers:
+  - Valid web app manifest with icons, name, start_url, display
+  - Registered service worker with fetch handler
+  - HTTPS (or localhost) — LHCI won't flag localhost
+  - Proper viewport meta tag
+  - Redirects HTTP to HTTPS (if applicable)
+  - `apple-mobile-web-app-capable` and iOS meta tags
+- All **lighthouse:recommended** assertions for performance,
+  accessibility, best-practices, and SEO are also evaluated
+  (warnings only; PWA is the gating failure).
+
+### Interpreting failures
+
+If `make web/lighthouse` exits non-zero, the LHCI output will show
+which assertion failed. Common causes:
+
+| Failure | Fix |
+|---|---|
+| `categories:pwa < 0.9` | Check manifest validity, service worker registration, and HTTPS in DevTools → Application → Manifest |
+| `installable-manifest` | Verify `/static/manifest.webmanifest` Content-Type and icon sizes |
+| `service-worker` | Check `/static/sw.js` has a `fetch` handler and registers without errors |
+| `is-on-https` | Run behind Caddy/nginx with TLS; localhost is exempt |
+
+### Configuration
+
+The audit is configured in `.lighthouserc.json` at the repo root.
+The `LIGHTHOUSE_BASE_URL` env var (default `http://127.0.0.1:7777`)
+is expanded at runtime. To change assertion thresholds, edit the
+`assertions` block in that file.
+
+---
+
 ## Related documents
 
 - [Web protocol reference](./web-protocol.md) — structured chat API
