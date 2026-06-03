@@ -266,7 +266,7 @@ viewport with touch input, and gracefully scale up to desktop.
     - Production deployment (TLS, reverse proxy)
     - Architecture overview (PTY vs chat mode, when to use each)
     - Mobile install instructions
-- [ ] **CHANGELOG.md entry** summarizing the new web UI.
+- [x] **CHANGELOG.md entry** summarizing the new web UI.
 
 ---
 
