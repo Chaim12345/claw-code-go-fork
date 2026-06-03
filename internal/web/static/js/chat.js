@@ -10,6 +10,7 @@
   var composer       = document.getElementById('composer');
   var composerInput  = document.getElementById('composer-input');
   var sendButton     = document.getElementById('send-button');
+  var charCountEl    = document.getElementById('char-count');
   var messagesEl     = document.getElementById('messages');
   var statusPill     = document.getElementById('connection-status');
   var sidebarToggle  = document.getElementById('sidebar-toggle');
@@ -41,25 +42,68 @@
   }
 
   // ── Composer ─────────────────────────────────────────────
-  composerInput.addEventListener('input', function () {
-    this.style.height = 'auto';
-    var lh = parseFloat(getComputedStyle(this).lineHeight) || 24;
-    this.style.height = Math.min(this.scrollHeight, lh * 8) + 'px';
-    sendButton.disabled = this.value.trim().length === 0;
-    if (window.visualViewport) handleViewportResize();
-  });
+  var CHAR_COUNT_WARN_THRESHOLD = 0.9;   // show when > 90% of maxlength
+  var AUTO_GROW_MAX_ROWS = 8;
 
-  composer.addEventListener('submit', function (e) {
-    e.preventDefault();
+  function autoGrowTextarea() {
+    composerInput.style.height = 'auto';
+    var lh = parseFloat(getComputedStyle(composerInput).lineHeight) || 24;
+    var maxHeight = lh * AUTO_GROW_MAX_ROWS +
+                    parseFloat(getComputedStyle(composerInput).paddingTop || 0) +
+                    parseFloat(getComputedStyle(composerInput).paddingBottom || 0);
+    composerInput.style.height = Math.min(composerInput.scrollHeight, maxHeight) + 'px';
+    // Toggle overflow for very long text beyond max rows
+    composerInput.style.overflowY = composerInput.scrollHeight > maxHeight ? 'auto' : 'hidden';
+  }
+
+  function updateCharCount() {
+    if (!charCountEl) return;
+    var len = composerInput.value.length;
+    var max = parseInt(composerInput.getAttribute('maxlength'), 10) || 100000;
+    var threshold = max * CHAR_COUNT_WARN_THRESHOLD;
+
+    if (len > threshold) {
+      charCountEl.textContent = len.toLocaleString() + ' / ' + max.toLocaleString();
+      charCountEl.className = len > max * 0.98 ? 'char-count-warn' : 'char-count-visible';
+    } else {
+      charCountEl.className = 'char-count-hidden';
+    }
+  }
+
+  function sendMessage() {
     var text = composerInput.value.trim();
     if (!text || !ws || ws.readyState !== WebSocket.OPEN) return;
     ws.send(JSON.stringify({ type: 'user_input', text: text }));
     appendMessage('user', escapeHtml(text));
     composerInput.value = '';
     composerInput.style.height = '';
+    composerInput.style.overflowY = 'hidden';
     sendButton.disabled = true;
+    updateCharCount();
     composerInput.focus();
     scrollToBottom();
+  }
+
+  composerInput.addEventListener('input', function () {
+    autoGrowTextarea();
+    updateCharCount();
+    sendButton.disabled = this.value.trim().length === 0;
+    if (window.visualViewport) handleViewportResize();
+  });
+
+  // Enter to submit, Shift+Enter for newline
+  composerInput.addEventListener('keydown', function (e) {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      sendMessage();
+    }
+    // Shift+Enter: let default behavior insert newline (no-op here)
+  });
+
+  // Still handle form submit for the send button click
+  composer.addEventListener('submit', function (e) {
+    e.preventDefault();
+    sendMessage();
   });
 
   // ── Message rendering ────────────────────────────────────

@@ -183,7 +183,7 @@ viewport with touch input, and gracefully scale up to desktop.
   of the input, and three buttons: Allow once / Always allow / Deny.
   Send the corresponding `permission_reply` over the WS. On mobile
   the dialog fills the bottom 60% as a sheet.
-- [ ] **Composer**: `<textarea>` with `auto-grow` (height adjusts
+- [x] **Composer**: `<textarea>` with `auto-grow` (height adjusts
   to content up to a max of 8 rows). Submit on Enter, newline on
   Shift+Enter. Send button is a 44x44 touch target. Show character
   count when approaching the per-message limit.

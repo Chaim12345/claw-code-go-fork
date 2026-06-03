@@ -32,13 +32,16 @@
 
   <footer>
     <form id="composer" autocomplete="off">
-      <textarea
-        id="composer-input"
-        rows="1"
-        placeholder="Ask claw-code-go…"
-        aria-label="Message input"
-        maxlength="100000"
-      ></textarea>
+      <div id="composer-wrapper">
+        <textarea
+          id="composer-input"
+          rows="1"
+          placeholder="Ask claw-code-go…"
+          aria-label="Message input"
+          maxlength="100000"
+        ></textarea>
+        <span id="char-count" class="char-count-hidden" aria-live="polite"></span>
+      </div>
       <button type="submit" id="send-button" aria-label="Send message" title="Send message">
         ↑
       </button>
