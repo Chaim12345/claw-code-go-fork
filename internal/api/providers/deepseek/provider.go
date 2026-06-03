@@ -659,23 +659,56 @@ func buildPrompt(system string, messages []api.Message, tools []api.Tool) string
 	return strings.Join(parts, "\n\n")
 }
 
-// buildDeltaPrompt renders only the last user message(s) for delta mode.
-// Unlike buildPrompt, it does NOT include the system prompt, tool
-// descriptions, or conversation history — the server maintains those via
-// the chat_session_id + parent_message_id chain.
+// buildDeltaPrompt renders all user/assistant/tool messages but WITHOUT
+// the system prompt or tool descriptions. The server already has those
+// from the first request in the chat session. This avoids resending the
+// static system+tools context (saving ~28K tokens per iteration) while
+// still sending the full dynamic conversation history so the model
+// doesn't lose track of tool calls within a single iteration.
 func buildDeltaPrompt(messages []api.Message) string {
 	var parts []string
 	for _, msg := range messages {
-		if msg.Role != "user" {
-			continue
-		}
-		for _, block := range msg.Content {
-			if block.Type == "text" && block.Text != "" {
-				parts = append(parts, block.Text)
+		switch msg.Role {
+		case "user":
+			var textParts []string
+			var toolResults []string
+			for _, block := range msg.Content {
+				switch block.Type {
+				case "text":
+					if block.Text != "" {
+						textParts = append(textParts, block.Text)
+					}
+				case "tool_result":
+					content := extractToolResultText(block)
+					toolResults = append(toolResults, fmt.Sprintf("[Tool:%s result]\n%s", block.ToolUseID, content))
+				}
+			}
+			if len(textParts) > 0 {
+				parts = append(parts, "[User]\n"+strings.Join(textParts, "\n"))
+			}
+			if len(toolResults) > 0 {
+				parts = append(parts, strings.Join(toolResults, "\n\n"))
+			}
+		case "assistant":
+			var textParts []string
+			for _, block := range msg.Content {
+				switch block.Type {
+				case "text":
+					if block.Text != "" {
+						textParts = append(textParts, block.Text)
+					}
+				case "tool_use":
+					argsJSON, _ := json.Marshal(block.Input)
+					textParts = append(textParts, fmt.Sprintf("[Assistant tool call: %s(%s)]", block.Name, string(argsJSON)))
+				}
+			}
+			if len(textParts) > 0 {
+				parts = append(parts, "[Assistant]\n"+strings.Join(textParts, "\n"))
 			}
 		}
 	}
-	return strings.Join(parts, "\n")
+	parts = append(parts, "\nRespond with the next assistant turn. To call a tool, output a JSON object like {\"tool_calls\":[{\"name\":\"...\",\"arguments\":{...}}]} on its own line, or use XML: <tool_calls><invoke name=\"tool_name\"><parameter name=\"arg\">value</parameter></invoke></tool_calls>.")
+	return strings.Join(parts, "\n\n")
 }
 
 func extractToolResultText(block api.ContentBlock) string {
