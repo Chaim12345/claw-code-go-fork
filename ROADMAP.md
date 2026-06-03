@@ -276,7 +276,7 @@ viewport with touch input, and gracefully scale up to desktop.
   (`internal/web/auth_test.go`, `ratelimit_test.go`,
   `security_test.go`, `chatproto_test.go`). Aim for ≥80% coverage
   on new code.
-- [ ] **Integration test** in `internal/web/integration_test.go`:
+- [x] **Integration test** in `internal/web/integration_test.go`:
   spins up a `httptest.Server`, opens a `websocket` connection,
   sends a `user_input`, asserts the expected sequence of
   `text_delta` and `text_final` events. Use a fake `api.APIClient`.
