@@ -116,6 +116,13 @@ func (s *chatSessionStore) handleSessions(w http.ResponseWriter, r *http.Request
 	}
 }
 
+// count returns the number of active chat sessions.
+func (s *chatSessionStore) count() int {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return len(s.sessions)
+}
+
 // truncateText returns at most maxLen runes of s, appending "…" if
 // truncated. Keeps byte representation under control for preview text.
 func truncateText(s string, maxLen int) string {

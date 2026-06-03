@@ -88,6 +88,15 @@ type Server struct {
 	// Set by NewServer; nil-safe in all instrumentation paths.
 	metrics *Metrics
 
+	// startTime records when the server was created, used for uptime
+	// reporting in /healthz.
+	startTime time.Time
+
+	// lastProviderError records the timestamp of the most recent
+	// provider error for health check reporting.
+	lastProviderErr   error
+	lastProviderErrAt time.Time
+
 	mu        sync.Mutex
 	sessions  map[*ptySession]struct{}
 }
@@ -106,6 +115,7 @@ func NewServer(cfg Config) *Server {
 		rateLimiter:  newRateLimiter(),
 		chatSessions: newChatSessionStore(),
 		metrics:      NewMetrics(),
+		startTime:    time.Now(),
 		sessions:     make(map[*ptySession]struct{}),
 	}
 }
@@ -152,10 +162,8 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("/ws", s.handleWS)
 	mux.HandleFunc("/api/chat/ws", s.handleChatWS)
 	mux.HandleFunc("/api/sessions", s.chatSessions.handleSessions)
-	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte("ok"))
-	})
+	mux.HandleFunc("/healthz", s.handleHealthz)
+	mux.HandleFunc("/readyz", s.handleReadyz)
 	// Safe area insets visual test page for mobile development.
 	mux.HandleFunc("/safe-area-test", s.handleSafeAreaTest)
 	mux.HandleFunc("/error", s.handleError)

@@ -59,6 +59,48 @@ func TestServer_Healthz(t *testing.T) {
 	if resp.StatusCode != 200 {
 		t.Fatalf("status = %d", resp.StatusCode)
 	}
+
+	// Should return JSON with the expected fields.
+	body, _ := io.ReadAll(resp.Body)
+	if !strings.Contains(string(body), `"status"`) {
+		t.Errorf("healthz response should be JSON, got: %s", body)
+	}
+	if !strings.Contains(string(body), `"version"`) {
+		t.Errorf("healthz response missing version, got: %s", body)
+	}
+	if !strings.Contains(string(body), `"uptime_seconds"`) {
+		t.Errorf("healthz response missing uptime_seconds, got: %s", body)
+	}
+	if !strings.Contains(string(body), `"active_sessions"`) {
+		t.Errorf("healthz response missing active_sessions, got: %s", body)
+	}
+
+	ct := resp.Header.Get("Content-Type")
+	if !strings.Contains(ct, "application/json") {
+		t.Errorf("Content-Type = %q, want application/json", ct)
+	}
+}
+
+func TestServer_ReadyzNoFactory(t *testing.T) {
+	s := NewServer(Config{Addr: "127.0.0.1:0"})
+	ts := httptest.NewServer(s.routes())
+	defer ts.Close()
+
+	resp, err := http.Get(ts.URL + "/readyz")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+
+	// Without ChatLoopFactory, /readyz should return 503.
+	if resp.StatusCode != http.StatusServiceUnavailable {
+		t.Errorf("status = %d, want %d", resp.StatusCode, http.StatusServiceUnavailable)
+	}
+
+	body, _ := io.ReadAll(resp.Body)
+	if !strings.Contains(string(body), "ChatLoopFactory not configured") {
+		t.Errorf("readyz response missing expected detail, got: %s", body)
+	}
 }
 
 func TestServer_StaticAssetsServed(t *testing.T) {

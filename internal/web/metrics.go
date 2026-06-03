@@ -155,6 +155,8 @@ func routePattern(path string) string {
 		return "/"
 	case path == "/healthz":
 		return "/healthz"
+	case path == "/readyz":
+		return "/readyz"
 	case path == "/ws":
 		return "/ws"
 	case path == "/api/chat/ws":
