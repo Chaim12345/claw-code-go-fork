@@ -272,7 +272,7 @@ viewport with touch input, and gracefully scale up to desktop.
 
 ## Phase 7 — Tests & CI
 
-- [ ] **Unit tests** for every new package
+- [x] **Unit tests** for every new package
   (`internal/web/auth_test.go`, `ratelimit_test.go`,
   `security_test.go`, `chatproto_test.go`). Aim for ≥80% coverage
   on new code.
