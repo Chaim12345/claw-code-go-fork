@@ -70,11 +70,17 @@
         ></textarea>
         <span id="char-count" class="char-count-hidden" aria-live="polite"></span>
       </div>
+      <button type="button" id="stop-button" aria-label="Stop generating" title="Stop generating" style="display:none;">
+        ■
+      </button>
       <button type="submit" id="send-button" aria-label="Send message" title="Send message">
         ↑
       </button>
     </form>
   </footer>
+
+  <!-- Scroll-to-bottom button -->
+  <button type="button" id="scroll-bottom-btn" class="scroll-bottom-btn-hidden" aria-label="Scroll to bottom" title="Scroll to bottom">↓</button>
 
   <!-- iOS "Add to Home Screen" install banner -->
   <div id="ios-install-banner" class="ios-banner-hidden" role="alert">

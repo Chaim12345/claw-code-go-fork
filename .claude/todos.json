@@ -1,43 +1,37 @@
 [
   {
     "id": "1",
-    "content": "Create session_store.go with chat session tracking and /api/sessions endpoint",
-    "status": "done",
-    "priority": "high"
-  },
-  {
-    "id": "2",
-    "content": "Add GET /api/sessions endpoint to server routes",
-    "status": "done",
-    "priority": "high"
-  },
-  {
-    "id": "3",
-    "content": "Update chat.html sidebar with New session button",
-    "status": "done",
-    "priority": "high"
-  },
-  {
-    "id": "4",
-    "content": "Update chat.js with session list fetching, rendering, tap-to-switch, per-session localStorage",
-    "status": "done",
-    "priority": "high"
-  },
-  {
-    "id": "5",
-    "content": "Update chat.css with sidebar animations and new session button styles",
-    "status": "done",
-    "priority": "medium"
-  },
-  {
-    "id": "6",
-    "content": "Add server test for /api/sessions endpoint",
+    "content": "Audit backend for performance/robustness gaps (chat_session, server, runtime)",
     "status": "in_progress",
     "priority": "high"
   },
   {
-    "id": "7",
-    "content": "Build \u0026 test, mark item done in ROADMAP.md, commit",
+    "id": "2",
+    "content": "Optimize WebSocket connection handling (backpressure, write deadlines)",
+    "status": "pending",
+    "priority": "high"
+  },
+  {
+    "id": "3",
+    "content": "Improve chat session concurrency and goroutine lifecycle",
+    "status": "pending",
+    "priority": "high"
+  },
+  {
+    "id": "4",
+    "content": "Add connection pool / HTTP client reuse for provider calls",
+    "status": "pending",
+    "priority": "medium"
+  },
+  {
+    "id": "5",
+    "content": "Harden error handling and graceful degradation",
+    "status": "pending",
+    "priority": "medium"
+  },
+  {
+    "id": "6",
+    "content": "Verify build and run tests",
     "status": "pending",
     "priority": "high"
   }

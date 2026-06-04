@@ -384,6 +384,12 @@ func looksLikeTransientRalphError(err error) bool {
 		"temporarily unavailable",
 		"no session id",
 		"pow",
+		"length limit",
+		"prompt too large",
+		"context length exceeded",
+		"maximum context length",
+		"context_length_exceeded",
+		"input is too long",
 	}
 	for _, h := range hints {
 		if strings.Contains(s, h) {

@@ -36,6 +36,7 @@ func newCommandRegistry() *commandRegistry {
 
 		// Session management
 		{ID: "clear", Label: "Clear session", Description: "Wipe conversation history", Category: "session", Shortcut: "Ctrl+L"},
+		{ID: "compact", Label: "Compact session", Description: "Summarize and compress conversation history", Category: "session"},
 		{ID: "session save", Label: "Save session", Description: "Save current session to disk", Category: "session", Args: "[name]"},
 		{ID: "sessions", Label: "Browse sessions", Description: "Open the session picker to load a session", Category: "session"},
 		{ID: "session list", Label: "List sessions", Description: "Show all saved sessions", Category: "session"},

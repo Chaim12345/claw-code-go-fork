@@ -134,6 +134,12 @@ type loginCompleteMsg struct {
 	err      error
 }
 
+// compactResultMsg is sent when manual session compaction completes.
+type compactResultMsg struct {
+	summary string
+	err     error
+}
+
 // Model is the Bubble Tea application model.
 type Model struct {
 	state  appState
@@ -547,6 +553,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case loginCompleteMsg:
 		return m.handleLoginComplete(msg)
 
+	case compactResultMsg:
+		if msg.err != nil {
+			m.viewBuf += errorStyle.Render(fmt.Sprintf("Compaction failed: %v\n\n", msg.err))
+		} else {
+			m.viewBuf += statusStyle.Render(fmt.Sprintf("Session compacted successfully.\n\nSummary:\n%s\n\n", msg.summary))
+			// Update token counts after compaction
+			m.inputTokens = runtime.EstimateTokens(m.loop.Session.Messages)
+		}
+		m = m.refreshViewport()
+		return m, nil
+
 	case spinner.TickMsg:
 		if (m.state == stateBusy && !m.hasStreamContent) || m.state == stateLoginOAuth {
 			var cmd tea.Cmd
@@ -828,6 +845,9 @@ func (m Model) handleSlashCommand(cmd string) (tea.Model, tea.Cmd) {
 		m.outputTokens = 0
 		m = m.refreshViewport()
 		return m, nil
+
+	case "/compact":
+		return m.handleCompactCommand()
 
 	case "/session-list":
 		metas, err := m.loop.ListSessionsWithMeta()
@@ -1482,6 +1502,8 @@ func (m Model) runSystemAction(system string) (tea.Model, tea.Cmd) {
 		m.outputTokens = 0
 		m = m.refreshViewport()
 		return m, nil
+	case "compact":
+		return m.handleCompactCommand()
 	case "toggle-mode":
 		return m.cyclePermissionMode()
 	case "open-session-picker":
@@ -1596,6 +1618,38 @@ func (m Model) cyclePermissionMode() (tea.Model, tea.Cmd) {
 
 // toggleLastToolCard flips the expanded state of the most recent tool
 // card. Mirrors opencode's Ctrl+T keybinding.
+
+// handleCompactCommand manually triggers session compaction, summarizing
+// the conversation history to save context space.
+func (m Model) handleCompactCommand() (tea.Model, tea.Cmd) {
+	if m.loop == nil {
+		m.viewBuf += warnStyle.Render("No active session to compact.\n\n")
+		m = m.refreshViewport()
+		return m, nil
+	}
+
+	// Check if there are messages to compact
+	if len(m.loop.Session.Messages) == 0 {
+		m.viewBuf += warnStyle.Render("No messages to compact.\n\n")
+		m = m.refreshViewport()
+		return m, nil
+	}
+
+	m.viewBuf += statusStyle.Render("Compacting session...\n\n")
+	m = m.refreshViewport()
+
+	// Trigger compaction asynchronously
+	return m, func() tea.Msg {
+		ctx := context.Background()
+		summary, err := runtime.CompactSession(ctx, m.loop.Client, m.loop.Config, m.loop.Session)
+		if err != nil {
+			return compactResultMsg{err: err}
+		}
+		return compactResultMsg{summary: summary}
+	}
+}
+
+
 func (m Model) toggleLastToolCard() (tea.Model, tea.Cmd) {
 	if len(m.toolCards) == 0 {
 		return m, nil

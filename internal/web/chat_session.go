@@ -41,6 +41,12 @@ func runChatSession(ctx context.Context, conn *websocket.Conn, loop *runtime.Con
 		SessionID: sessionID,
 	})
 
+	// This is the context the conversation runner goroutine uses.
+	// When the read loop exits (client disconnected), we cancel this
+	// context to unblock SendMessageStreaming.
+	_, turnCancel := context.WithCancel(ctx)
+	defer turnCancel()
+
 	// TurnEvents from SendMessageStreaming will be written here.
 	turnEvents := make(chan runtime.TurnEvent, 32)
 

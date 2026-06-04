@@ -2,94 +2,102 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no" />
-  <title>claw-code-go</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#1a1a2e" media="(prefers-color-scheme: dark)" />
+  <meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)" />
+  <title>claw-code-go — Terminal</title>
+  <link rel="stylesheet" href="/static/css/chat.css" />
   <link rel="stylesheet" href="/static/css/terminal.css" />
   <style>
-    :root {
-      color-scheme: dark;
+    /* Terminal page overrides: full-height terminal container */
+    body {
+      grid-template-rows: var(--topbar-height) 1fr;
+      grid-template-areas:
+        "header"
+        "main";
     }
-    * { box-sizing: border-box; }
-    html, body {
-      margin: 0;
-      padding: 0;
-      height: 100%;
-      background: #0b0b0d;
-      color: #d4d4d4;
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+    footer { display: none; }
+
+    #layout {
+      grid-area: main;
+      display: flex;
       overflow: hidden;
     }
-    #app {
-      display: flex;
-      flex-direction: column;
-      height: 100vh;
-    }
-    header.bar {
-      flex: 0 0 auto;
-      display: flex;
-      align-items: center;
-      gap: 12px;
-      padding: 8px 14px;
-      background: #141418;
-      border-bottom: 1px solid #2a2a30;
-      font-size: 13px;
-    }
-    header.bar .logo { color: #ff7a59; font-weight: 600; }
-    header.bar .sep { color: #555; }
-    header.bar .spacer { flex: 1; }
-    header.bar .status { color: #888; font-variant-numeric: tabular-nums; }
-    header.bar .status.ok { color: #6fcf97; }
-    header.bar .status.err { color: #eb5757; }
-    header.bar button {
-      background: #1f1f25;
-      color: #ccc;
-      border: 1px solid #333;
-      border-radius: 4px;
-      padding: 4px 10px;
-      font-size: 12px;
-      cursor: pointer;
-    }
-    header.bar button:hover { background: #2a2a32; }
+
     #term-wrap {
       flex: 1 1 auto;
       min-height: 0;
-      padding: 8px;
-      background: #0b0b0d;
+      padding: var(--space-sm);
+      background: var(--color-bg);
     }
+
     #terminal {
       width: 100%;
       height: 100%;
     }
+
+    /* Toast notification */
     .toast {
       position: fixed;
-      bottom: 12px;
+      bottom: var(--space-md);
       left: 50%;
       transform: translateX(-50%);
-      background: #2a2a32;
-      color: #ddd;
-      padding: 6px 12px;
-      border-radius: 4px;
-      border: 1px solid #444;
-      font-size: 12px;
+      background: var(--color-surface);
+      color: var(--color-text);
+      padding: var(--space-sm) var(--space-md);
+      border-radius: var(--radius-sm);
+      border: 1px solid var(--color-border);
+      font-size: var(--text-xs);
       pointer-events: none;
       opacity: 0;
       transition: opacity 200ms;
+      z-index: 999;
     }
     .toast.show { opacity: 1; }
+
+    /* Reduced motion */
+    @media (prefers-reduced-motion: reduce) {
+      .toast { transition: none; }
+    }
   </style>
 </head>
 <body>
-  <div id="app">
-    <header class="bar">
-      <span class="logo">claw-code-go</span>
-      <span class="sep">·</span>
-      <span class="status" id="conn-status">connecting…</span>
-      <span class="spacer"></span>
-      <button type="button" id="reconnect-btn" title="Drop the PTY session and start a fresh one">New session</button>
-    </header>
-    <div id="term-wrap"><div id="terminal" role="textbox" aria-label="Terminal"></div></div>
+  <header id="top-bar">
+    <a href="/" class="header-action-btn" aria-label="Back to chat" title="Back to chat" style="text-decoration:none;">←</a>
+    <h1>claw-code-go</h1>
+    <span id="connection-status" class="status-pill status-connected">connected</span>
+    <button type="button" id="theme-toggle" class="header-action-btn" aria-label="Switch theme" title="Switch theme (system/light/dark)">◐</button>
+    <button type="button" id="font-size-toggle" class="header-action-btn" aria-label="Change font size" title="Font size (S/M/L)">A</button>
+    <button type="button" id="reconnect-btn" class="header-action-btn" title="Drop the PTY session and start a fresh one" aria-label="New session" style="width:auto;padding:0 var(--space-sm);font-weight:600;">↻</button>
+  </header>
+
+  <div id="layout">
+    <main id="term-wrap"><div id="terminal" role="textbox" aria-label="Terminal"></div></main>
   </div>
+
   <div class="toast" id="toast"></div>
+
+  <script>
+    /* ── Theme support (shared with chat page) ─────────────── */
+    (function() {
+      var THEME_KEY = 'claw_theme';
+      var saved = localStorage.getItem(THEME_KEY);
+      if (saved === 'light' || saved === 'dark') {
+        document.documentElement.setAttribute('data-theme', saved);
+      }
+    })();
+  </script>
+
+  <script>
+    /* ── Font size support (shared with chat page) ────────── */
+    (function() {
+      var FONT_SIZE_KEY = 'claw_font_size';
+      var saved = localStorage.getItem(FONT_SIZE_KEY);
+      if (saved === 's' || saved === 'l') {
+        document.documentElement.setAttribute('data-font-size', saved);
+      }
+    })();
+  </script>
 
   <script type="importmap">
   {
@@ -103,13 +111,19 @@
     import { WTerm } from "/static/js/@wterm/dom/wterm.js";
 
     const termEl   = document.getElementById("terminal");
-    const statusEl = document.getElementById("conn-status");
+    const statusEl = document.getElementById("connection-status");
     const toastEl  = document.getElementById("toast");
     const reconnectBtn = document.getElementById("reconnect-btn");
 
-    function setStatus(text, cls) {
-      statusEl.textContent = text;
-      statusEl.className = "status" + (cls ? " " + cls : "");
+    function setStatus(state) {
+      var labels = {
+        'connected':     '✓ connected',
+        'reconnecting':  '↻ reconnecting',
+        'disconnected':  '✗ disconnected',
+        'error':         '✗ error'
+      };
+      statusEl.className = 'status-pill status-' + state;
+      statusEl.textContent = labels[state] || state;
     }
 
     let toastTimer;
@@ -117,7 +131,7 @@
       toastEl.textContent = text;
       toastEl.classList.add("show");
       clearTimeout(toastTimer);
-      toastTimer = setTimeout(() => toastEl.classList.remove("show"), 1600);
+      toastTimer = setTimeout(function() { toastEl.classList.remove("show"); }, 2000);
     }
 
     const term = new WTerm(termEl, {
@@ -130,44 +144,42 @@
     await term.init();
     term.focus();
 
-    // Sanity probe — first few bytes tell us the WASM is alive.
     console.log("[wterm] cols=" + term.cols + " rows=" + term.rows);
 
     function sendResize(cols, rows) {
       if (ws && ws.readyState === WebSocket.OPEN) {
-        ws.send(JSON.stringify({ type: "resize", cols, rows }));
+        ws.send(JSON.stringify({ type: "resize", cols: cols, rows: rows }));
       }
     }
 
-    term.onResize = (cols, rows) => sendResize(cols, rows);
+    term.onResize = function(cols, rows) { sendResize(cols, rows); };
 
     let ws;
     function connect() {
-      const proto = location.protocol === "https:" ? "wss:" : "ws:";
-      const url = `${proto}//${location.host}/ws`;
+      var proto = location.protocol === "https:" ? "wss:" : "ws:";
+      var url = proto + "//" + location.host + "/ws";
       ws = new WebSocket(url);
       ws.binaryType = "arraybuffer";
-      setStatus("connecting…");
+      setStatus("reconnecting");
 
-      ws.onopen = () => {
-        setStatus("connected", "ok");
+      ws.onopen = function() {
+        setStatus("connected");
         sendResize(term.cols, term.rows);
       };
-      ws.onmessage = (e) => {
-        // PTY -> wterm. Always binary from the server side.
-        const data = e.data instanceof ArrayBuffer
+      ws.onmessage = function(e) {
+        var data = e.data instanceof ArrayBuffer
           ? new TextDecoder().decode(e.data)
           : e.data;
         term.write(data);
       };
-      ws.onerror = () => setStatus("error", "err");
-      ws.onclose = () => {
-        setStatus("disconnected — reconnecting in 1s", "err");
+      ws.onerror = function() { setStatus("error"); };
+      ws.onclose = function() {
+        setStatus("disconnected");
         setTimeout(connect, 1000);
       };
     }
 
-    term.onData = (data) => {
+    term.onData = function(data) {
       if (ws && ws.readyState === WebSocket.OPEN) {
         ws.send(data);
       }
@@ -175,18 +187,93 @@
 
     connect();
 
-    // Reconnect = drop WS, server will spawn a fresh PTY.
-    reconnectBtn.addEventListener("click", () => {
+    reconnectBtn.addEventListener("click", function() {
       if (ws) ws.close();
-      // Force a fresh terminal display too.
       term.write("\x1b[2J\x1b[H");
       setTimeout(connect, 250);
     });
 
-    // Page unload: leave the PTY to be reaped by the server.
-    window.addEventListener("beforeunload", () => {
-      try { ws && ws.close(); } catch (_) {}
+    window.addEventListener("beforeunload", function() {
+      try { ws && ws.close(); } catch(_) {}
     });
+
+    /* ── Theme toggle ─────────────────────────────────────── */
+    (function() {
+      var THEME_KEY = 'claw_theme';
+      var THEME_CYCLE = ['system', 'light', 'dark'];
+      var themeToggle = document.getElementById('theme-toggle');
+      var labels = { system: '◐', light: '☀', dark: '☾' };
+
+      function getCurrentTheme() {
+        return document.documentElement.getAttribute('data-theme') || 'system';
+      }
+
+      function applyTheme(theme) {
+        if (theme === 'system') {
+          document.documentElement.removeAttribute('data-theme');
+        } else {
+          document.documentElement.setAttribute('data-theme', theme);
+        }
+        localStorage.setItem(THEME_KEY, theme);
+        themeToggle.textContent = labels[theme] || '◐';
+      }
+
+      function cycleTheme() {
+        var current = getCurrentTheme();
+        var idx = THEME_CYCLE.indexOf(current);
+        var next = THEME_CYCLE[(idx + 1) % THEME_CYCLE.length];
+        applyTheme(next);
+      }
+
+      var saved = localStorage.getItem(THEME_KEY);
+      if (saved && (saved === 'light' || saved === 'dark')) {
+        applyTheme(saved);
+      } else {
+        themeToggle.textContent = labels['system'];
+      }
+
+      themeToggle.addEventListener('click', cycleTheme);
+    })();
+
+    /* ── Font size toggle ─────────────────────────────────── */
+    (function() {
+      var FONT_SIZE_KEY = 'claw_font_size';
+      var FONT_SIZE_CYCLE = ['s', 'm', 'l'];
+      var fontSizeToggle = document.getElementById('font-size-toggle');
+      var labels = { s: 'S', m: 'M', l: 'L' };
+
+      function getCurrentFontSize() {
+        return document.documentElement.getAttribute('data-font-size') || 'm';
+      }
+
+      function applyFontSize(size) {
+        if (size === 'm') {
+          document.documentElement.removeAttribute('data-font-size');
+        } else {
+          document.documentElement.setAttribute('data-font-size', size);
+        }
+        localStorage.setItem(FONT_SIZE_KEY, size);
+        fontSizeToggle.textContent = labels[size] || 'A';
+        fontSizeToggle.style.fontWeight = size === 'l' ? '700' : '500';
+        fontSizeToggle.style.fontSize = size === 's' ? '0.7rem' : size === 'l' ? '0.95rem' : '0.85rem';
+      }
+
+      function cycleFontSize() {
+        var current = getCurrentFontSize();
+        var idx = FONT_SIZE_CYCLE.indexOf(current);
+        var next = FONT_SIZE_CYCLE[(idx + 1) % FONT_SIZE_CYCLE.length];
+        applyFontSize(next);
+      }
+
+      var saved = localStorage.getItem(FONT_SIZE_KEY);
+      if (saved === 's' || saved === 'l') {
+        applyFontSize(saved);
+      } else {
+        fontSizeToggle.textContent = 'M';
+      }
+
+      fontSizeToggle.addEventListener('click', cycleFontSize);
+    })();
   </script>
 </body>
 </html>

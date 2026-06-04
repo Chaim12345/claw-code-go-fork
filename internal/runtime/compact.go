@@ -180,6 +180,11 @@ func buildTranscript(messages []api.Message) string {
 // CompactSession summarizes the session's message history by calling the model,
 // stores the summary in the session, and trims the message list to the most
 // recent cfg.CompactionKeepRecent messages. Returns the summary text.
+//
+// Uses a dedicated instant model client for reliability:
+// - Creates a separate client configured for instant model
+// - Ensures compaction works even if expert model is overloaded or failing
+// - The summary is then used in the main session (which may use expert model)
 func CompactSession(ctx context.Context, client api.APIClient, cfg *Config, session *Session) (string, error) {
 	if len(session.Messages) == 0 {
 		return "", nil
@@ -187,8 +192,12 @@ func CompactSession(ctx context.Context, client api.APIClient, cfg *Config, sess
 
 	transcript := buildTranscript(session.Messages)
 
+	// Create a dedicated compaction client using instant model
+	// This ensures compaction always succeeds even if expert model fails
+	compactClient := NewCompactClient(cfg, client)
+
 	req := api.CreateMessageRequest{
-		Model:     cfg.Model,
+		Model:     "instant", // Always use instant for compaction
 		MaxTokens: 2048,
 		Messages: []api.Message{
 			{
@@ -201,7 +210,7 @@ func CompactSession(ctx context.Context, client api.APIClient, cfg *Config, sess
 		Stream: true,
 	}
 
-	ch, err := client.StreamResponse(ctx, req)
+	ch, err := compactClient.StreamResponse(ctx, req)
 	if err != nil {
 		return "", fmt.Errorf("compact: stream response: %w", err)
 	}

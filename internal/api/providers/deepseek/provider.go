@@ -373,22 +373,31 @@ func (c *Client) StreamResponse(ctx context.Context, req api.CreateMessageReques
 						fmt.Fprintf(os.Stderr, "[deepseek] rate-limited: rotated to new token and resetting session\n")
 						c.resetSession()
 					}
-				} else if isLengthLimitError(lastErr) {
-					// Session exceeded length limit — create a fresh
-					// session and send the full prompt instead of delta.
-					backoff = 5 * time.Second
-					fmt.Fprintf(os.Stderr, "[deepseek] length limit: creating fresh session and resending full prompt\n")
-					c.resetSession()
-					if err := c.ensureSession(ctx); err != nil {
-						fmt.Fprintf(os.Stderr, "[deepseek] failed to create fresh session: %v\n", err)
-						return
-					}
+					// Re-read session/parent after potential reset so
+					// the next ChatCompletionStream call uses fresh state.
 					c.mu.Lock()
 					sessID = c.chatSessionID
-					c.parentMessageID = ""
+					parentID = c.parentMessageID
 					c.mu.Unlock()
 					parentPtr = nil
-					prompt = buildPrompt(req.System, req.Messages, req.Tools)
+					if parentID != "" {
+						parentPtr = &parentID
+					}
+					// In non-delta mode or after a session reset, rebuild
+					// the full prompt since parent_message_id was cleared.
+					if parentID == "" {
+						prompt = buildPrompt(req.System, req.Messages, req.Tools)
+					}
+				} else if isLengthLimitError(lastErr) {
+					// Length limit errors should propagate to the conversation
+					// loop so it can trigger auto-compaction. In delta mode,
+					// the server maintains context, so compaction just removes
+					// old messages from the client-side history. Don't reset
+					// the session here — that would break delta mode's
+					// parent_message_id chain.
+					fmt.Fprintf(os.Stderr, "[deepseek] length limit reached, propagating error for auto-compaction\n")
+					err = lastErr
+					break
 				} else {
 					backoff = time.Duration(1<<attempt) * 200 * time.Millisecond
 				}

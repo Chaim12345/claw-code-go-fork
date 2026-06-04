@@ -11,7 +11,7 @@ import (
 const (
 	// DefaultModel is the primary reasoning model for new sessions.
 	// "expert" maps to DeepSeek's powerful reasoning model (equivalent to R1).
-	DefaultModel     = "expert"
+	DefaultModel     = "expert-thinking"
 	DefaultMaxTokens = 8096
 )
 

@@ -192,34 +192,73 @@ func (loop *ConversationLoop) SendMessage(ctx context.Context, userText string) 
 
 	var totalInput, totalOutput int
 
-	// Agentic loop: keep going until stop_reason is "end_turn".
-	// If the provider rejects a turn because the prompt is too large,
-	// we compact once and retry before surfacing the error. The retry
-	// budget prevents an infinite loop when compaction cannot shrink
-	// the history below the model cap.
-	const maxPromptRecoveryRetries = 1
-	promptRecoveryRetries := 0
-retryTurn:
-	for {
-		stopReason, inTok, outTok, err := loop.runOneTurn(ctx)
-		if err != nil {
-			if promptRecoveryRetries < maxPromptRecoveryRetries && isPromptTooLargeError(err) {
-				promptRecoveryRetries++
-				fmt.Fprintf(os.Stderr, "[auto-compact] prompt exceeded model cap; compacting and retrying (%d/%d)\n",
-					promptRecoveryRetries, maxPromptRecoveryRetries)
-				if _, cerr := loop.CompactNow(ctx); cerr != nil {
-					return fmt.Errorf("prompt too large and auto-compact failed: %w (original: %v)", cerr, err)
-				}
-				continue retryTurn
-			}
-			return err
-		}
-		totalInput += inTok
-		totalOutput += outTok
+	// Retry configuration for transient errors
+	rc := defaultRetryConfig
+	var lastErr error
 
-		if stopReason != "tool_use" {
+	// Outer retry loop for transient errors (network issues, rate limits, etc.)
+	for retryAttempt := 0; retryAttempt <= rc.maxRetries; retryAttempt++ {
+		if retryAttempt > 0 {
+			backoff := rc.calculateBackoff(retryAttempt - 1)
+			fmt.Fprintf(os.Stderr, "[retry] transient error detected (attempt %d/%d), retrying in %v: %v\n",
+				retryAttempt, rc.maxRetries, backoff, lastErr)
+			time.Sleep(backoff)
+		}
+
+		// Agentic loop: keep going until stop_reason is "end_turn".
+		// If the provider rejects a turn because the prompt is too large,
+		// we compact once and retry before surfacing the error. The retry
+		// budget prevents an infinite loop when compaction cannot shrink
+		// the history below the model cap.
+		const maxPromptRecoveryRetries = 1
+		promptRecoveryRetries := 0
+		modelFallbackAttempted := false
+	retryTurn:
+		for {
+			stopReason, inTok, outTok, err := loop.runOneTurn(ctx)
+			if err != nil {
+				// Check for transient errors first - these get outer retry loop
+				if isTransientError(err) {
+					lastErr = err
+					break retryTurn // Break to outer retry loop
+				}
+
+				if promptRecoveryRetries < maxPromptRecoveryRetries && isPromptTooLargeError(err) {
+					promptRecoveryRetries++
+					fmt.Fprintf(os.Stderr, "[auto-compact] prompt exceeded model cap; compacting and retrying (%d/%d)\n",
+						promptRecoveryRetries, maxPromptRecoveryRetries)
+					if _, cerr := loop.CompactNow(ctx); cerr != nil {
+						return fmt.Errorf("prompt too large and auto-compact failed: %w (original: %v)", cerr, err)
+					}
+					continue retryTurn
+				}
+				// If expert model fails and we haven't tried fallback yet, switch to instant
+				if !modelFallbackAttempted && strings.HasPrefix(loop.Config.Model, "expert") {
+					modelFallbackAttempted = true
+					fmt.Fprintf(os.Stderr, "[model-fallback] expert model failed, switching to instant model and retrying\n")
+					loop.Config.Model = "instant"
+					continue retryTurn
+				}
+				return err
+			}
+			totalInput += inTok
+			totalOutput += outTok
+
+			if stopReason != "tool_use" {
+				break
+			}
+		}
+
+		// If we got here without error, the turn succeeded - break outer retry loop
+		if lastErr == nil {
 			break
 		}
+		lastErr = nil // Clear error for next retry attempt
+	}
+
+	// If we exhausted all retries, return the last error
+	if lastErr != nil {
+		return fmt.Errorf("operation failed after %d retries: %w", rc.maxRetries, lastErr)
 	}
 
 	// Update compaction state with the latest token counts (Phase 6).
@@ -474,36 +513,81 @@ func (loop *ConversationLoop) SendMessageStreaming(ctx context.Context, userText
 
 	var totalInput, totalOutput int
 
-	// Agentic loop: keep going until stop_reason is "end_turn".
-	// If the provider rejects a turn because the prompt is too large,
-	// compact once and retry before surfacing the error. Mirrors the
-	// same recovery path in SendMessage so both the TUI and
-	// autonomous (RunTask) paths benefit from it.
-	const maxStreamingPromptRecoveryRetries = 1
-	streamingPromptRecoveryRetries := 0
-streamingRetryTurn:
-	for {
-		stopReason, inTok, outTok, err := loop.runOneTurnStreaming(ctx, events)
-		if err != nil {
-			if streamingPromptRecoveryRetries < maxStreamingPromptRecoveryRetries && isPromptTooLargeError(err) {
-				streamingPromptRecoveryRetries++
-				fmt.Fprintf(os.Stderr, "[auto-compact] prompt exceeded model cap; compacting and retrying (%d/%d)\n",
-					streamingPromptRecoveryRetries, maxStreamingPromptRecoveryRetries)
-				if _, cerr := loop.CompactNow(ctx); cerr != nil {
-					events <- TurnEvent{Type: TurnEventError, Err: fmt.Errorf("prompt too large and auto-compact failed: %w (original: %v)", cerr, err)}
-					return fmt.Errorf("prompt too large and auto-compact failed: %w (original: %v)", cerr, err)
-				}
-				continue streamingRetryTurn
-			}
-			events <- TurnEvent{Type: TurnEventError, Err: err}
-			return err
-		}
-		totalInput += inTok
-		totalOutput += outTok
+	// Retry configuration for transient errors
+	rc := defaultRetryConfig
+	var lastErr error
 
-		if stopReason != "tool_use" {
+	// Outer retry loop for transient errors (network issues, rate limits, etc.)
+	for retryAttempt := 0; retryAttempt <= rc.maxRetries; retryAttempt++ {
+		if retryAttempt > 0 {
+			backoff := rc.calculateBackoff(retryAttempt - 1)
+			fmt.Fprintf(os.Stderr, "[retry] transient error detected (attempt %d/%d), retrying in %v: %v\n",
+				retryAttempt, rc.maxRetries, backoff, lastErr)
+			events <- TurnEvent{
+				Type: TurnEventWarn,
+				Text: fmt.Sprintf("Transient error detected, retrying in %v (attempt %d/%d)", backoff, retryAttempt, rc.maxRetries),
+			}
+			time.Sleep(backoff)
+		}
+
+		// Agentic loop: keep going until stop_reason is "end_turn".
+		// If the provider rejects a turn because the prompt is too large,
+		// compact once and retry before surfacing the error. Mirrors the
+		// same recovery path in SendMessage so both the TUI and
+		// autonomous (RunTask) paths benefit from it.
+		const maxStreamingPromptRecoveryRetries = 1
+		streamingPromptRecoveryRetries := 0
+		streamingModelFallbackAttempted := false
+	streamingRetryTurn:
+		for {
+			stopReason, inTok, outTok, err := loop.runOneTurnStreaming(ctx, events)
+			if err != nil {
+				// Check for transient errors first - these get outer retry loop
+				if isTransientError(err) {
+					lastErr = err
+					break streamingRetryTurn // Break to outer retry loop
+				}
+
+				if streamingPromptRecoveryRetries < maxStreamingPromptRecoveryRetries && isPromptTooLargeError(err) {
+					streamingPromptRecoveryRetries++
+					fmt.Fprintf(os.Stderr, "[auto-compact] prompt exceeded model cap; compacting and retrying (%d/%d)\n",
+						streamingPromptRecoveryRetries, maxStreamingPromptRecoveryRetries)
+					if _, cerr := loop.CompactNow(ctx); cerr != nil {
+						events <- TurnEvent{Type: TurnEventError, Err: fmt.Errorf("prompt too large and auto-compact failed: %w (original: %v)", cerr, err)}
+						return fmt.Errorf("prompt too large and auto-compact failed: %w (original: %v)", cerr, err)
+					}
+					continue streamingRetryTurn
+				}
+				// If expert model fails and we haven't tried fallback yet, switch to instant
+				if !streamingModelFallbackAttempted && strings.HasPrefix(loop.Config.Model, "expert") {
+					streamingModelFallbackAttempted = true
+					fmt.Fprintf(os.Stderr, "[model-fallback] expert model failed, switching to instant model and retrying\n")
+					loop.Config.Model = "instant"
+					continue streamingRetryTurn
+				}
+				events <- TurnEvent{Type: TurnEventError, Err: err}
+				return err
+			}
+			totalInput += inTok
+			totalOutput += outTok
+
+			if stopReason != "tool_use" {
+				break
+			}
+		}
+
+		// If we got here without error, the turn succeeded - break outer retry loop
+		if lastErr == nil {
 			break
 		}
+		lastErr = nil // Clear error for next retry attempt
+	}
+
+	// If we exhausted all retries, return the last error
+	if lastErr != nil {
+		err := fmt.Errorf("operation failed after %d retries: %w", rc.maxRetries, lastErr)
+		events <- TurnEvent{Type: TurnEventError, Err: err}
+		return err
 	}
 
 	// Update compaction state with the latest token counts (Phase 6).
@@ -1186,6 +1270,8 @@ var promptTooLargeMarkers = []string{
 	"maximum context length",
 	"context_length_exceeded",
 	"input is too long",
+	"length limit reached",
+	"length limit",
 }
 
 func isPromptTooLargeError(err error) bool {
@@ -1199,4 +1285,82 @@ func isPromptTooLargeError(err error) bool {
 		}
 	}
 	return false
+}
+
+
+
+// isTransientError checks if an error is likely transient and worth retrying.
+// This includes network issues, rate limits, server errors, and temporary unavailability.
+func isTransientError(err error) bool {
+	if err == nil {
+		return false
+	}
+	s := strings.ToLower(err.Error())
+	
+	// Context cancellation is never transient - user explicitly cancelled
+	if strings.Contains(s, "context canceled") || strings.Contains(s, "context deadline exceeded") {
+		return false
+	}
+	
+	// Transient error patterns
+	transientMarkers := []string{
+		"stream error",
+		"server is busy",
+		"too frequent",
+		"rate limit",
+		"rate_limit_reached",
+		"overloaded",
+		"429", // Too Many Requests
+		"500", // Internal Server Error
+		"502", // Bad Gateway
+		"503", // Service Unavailable
+		"504", // Gateway Timeout
+		"connection reset",
+		"connection refused",
+		"connection closed",
+		"timeout",
+		"timed out",
+		"eof",
+		"temporarily unavailable",
+		"no session id",
+		"pow", // Proof of work challenge
+		"network error",
+		"dial tcp",
+		"i/o timeout",
+		"broken pipe",
+		"connection aborted",
+	}
+	
+	for _, marker := range transientMarkers {
+		if strings.Contains(s, marker) {
+			return true
+		}
+	}
+	
+	return false
+}
+
+// retryConfig controls retry behavior for conversation operations
+type retryConfig struct {
+	maxRetries  int           // maximum number of retry attempts
+	baseBackoff time.Duration // initial backoff duration
+	maxBackoff  time.Duration // maximum backoff duration
+}
+
+// defaultRetryConfig provides sensible defaults for conversation retries
+var defaultRetryConfig = retryConfig{
+	maxRetries:  3,
+	baseBackoff: 2 * time.Second,
+	maxBackoff:  30 * time.Second,
+}
+
+// calculateBackoff computes exponential backoff with jitter
+func (rc *retryConfig) calculateBackoff(attempt int) time.Duration {
+	backoff := rc.baseBackoff * time.Duration(1<<uint(attempt))
+	if backoff > rc.maxBackoff {
+		backoff = rc.maxBackoff
+	}
+	// Add 20% jitter to prevent thundering herd
+	jitter := time.Duration(float64(backoff) * 0.2 * (0.5 + 0.5*float64(time.Now().UnixNano()%100)/100.0))
+	return backoff + jitter
 }

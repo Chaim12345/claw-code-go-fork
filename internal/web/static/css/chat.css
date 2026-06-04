@@ -98,6 +98,54 @@ html[data-font-size="l"] {
   --text-lg:   1.25rem;
 }
 
+/* === Reduced motion (accessibility) === */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+
+  .empty-state-icon {
+    animation: none;
+  }
+
+  .thinking-dots span {
+    animation: none;
+    opacity: 1;
+    transform: scale(1);
+  }
+
+  .thinking-indicator {
+    animation: none;
+    opacity: 1;
+    transform: none;
+  }
+
+  .offline-banner,
+  .rate-limit-banner {
+    animation: none;
+  }
+
+  .perm-overlay {
+    animation: none;
+  }
+
+  .perm-card {
+    animation: none;
+  }
+
+  #shortcuts-overlay {
+    animation: none;
+  }
+
+  .shortcuts-card {
+    animation: none;
+  }
+}
+
 /* === Base styles === */
 html {
   font-family: var(--font-sans);
@@ -411,6 +459,35 @@ footer {
   font-weight: 600;
 }
 
+/* Stop generation button (shown when model is generating) */
+#stop-button {
+  width: 44px;
+  height: 44px;
+  min-width: 44px;
+  border: none;
+  border-radius: 50%;
+  background: var(--color-danger);
+  color: #fff;
+  font-size: 0.9rem;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.15s, transform 0.1s;
+  -webkit-tap-highlight-color: transparent;
+  flex-shrink: 0;
+}
+#stop-button:hover { background: #dc2626; }
+#stop-button:active { transform: scale(0.9); }
+
+@media (max-width: 767px) {
+  #stop-button {
+    width: 40px;
+    height: 40px;
+    min-width: 40px;
+  }
+}
+
 #send-button {
   width: 44px;
   height: 44px;
@@ -451,7 +528,105 @@ footer {
   }
 }
 
-/* === Scrollbar styling === */
+/* === Scroll-to-bottom button === */
+#scroll-bottom-btn {
+  position: fixed;
+  bottom: 80px;
+  right: 20px;
+  z-index: 200;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  color: var(--color-text);
+  font-size: 1.1rem;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+  transition: opacity 0.2s, transform 0.2s;
+  opacity: 0;
+  transform: translateY(10px);
+  pointer-events: none;
+  -webkit-tap-highlight-color: transparent;
+}
+#scroll-bottom-btn:hover {
+  background: var(--color-border);
+}
+#scroll-bottom-btn:active {
+  transform: translateY(10px) scale(0.93);
+}
+
+#scroll-bottom-btn.scroll-bottom-btn-visible {
+  opacity: 1;
+  transform: translateY(0);
+  pointer-events: auto;
+}
+
+/* === Message action buttons (copy) === */
+.msg-actions {
+  display: flex;
+  gap: 4px;
+  margin-top: 4px;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+
+.message:hover .msg-actions,
+.message:focus-within .msg-actions {
+  opacity: 1;
+}
+
+.msg-action-btn {
+  padding: 2px 8px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg);
+  color: var(--color-text-muted);
+  font-family: var(--font-sans);
+  font-size: var(--text-xs);
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+  -webkit-tap-highlight-color: transparent;
+  min-height: 26px;
+}
+.msg-action-btn:hover {
+  background: var(--color-border);
+  color: var(--color-text);
+}
+
+/* === Sidebar loading/empty/error states === */
+.sidebar-loading,
+.sidebar-empty,
+.sidebar-error {
+  padding: var(--space-md);
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+  text-align: center;
+  line-height: 1.5;
+}
+
+.sidebar-error {
+  color: var(--color-danger);
+}
+
+.sidebar-retry-btn {
+  display: inline-block;
+  margin-top: var(--space-sm);
+  padding: 4px 12px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg);
+  color: var(--color-text);
+  font-size: var(--text-xs);
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.sidebar-retry-btn:hover {
+  background: var(--color-border);
+}
 #messages::-webkit-scrollbar,
 #sidebar::-webkit-scrollbar {
   width: 6px;

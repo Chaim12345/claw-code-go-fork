@@ -10,11 +10,13 @@
   var composer       = document.getElementById('composer');
   var composerInput  = document.getElementById('composer-input');
   var sendButton     = document.getElementById('send-button');
+  var stopButton     = document.getElementById('stop-button');
   var charCountEl    = document.getElementById('char-count');
   var messagesEl     = document.getElementById('messages');
   var statusPill     = document.getElementById('connection-status');
   var sidebarToggle  = document.getElementById('sidebar-toggle');
   var sidebar        = document.getElementById('sidebar');
+  var scrollBottomBtn = document.getElementById('scroll-bottom-btn');
 
   var ws = null;
   var reconnectTimer = null;
@@ -28,6 +30,8 @@
   // Reconnection / dedup state.
   var pendingMessages = {};    // message_id → {text, timestamp}
   var ackedMessages = {};      // message_id → true (pruned after 60s)
+  var messageQueue = [];       // queued messages when disconnected
+  var renderScheduled = false; // batched markdown rendering
 
   // ── Theme switcher (system / light / dark) ───────────────
   var themeToggle   = document.getElementById('theme-toggle');
@@ -197,9 +201,51 @@
     }
   }
 
+  /* ── Stop generation ───────────────────────────────────── */
+  function stopGeneration() {
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({ type: 'cancel' }));
+    }
+    finalizeAssistantBubble();
+    removeThinkingIndicator();
+    hideStopButton();
+  }
+
+  function showStopButton() {
+    if (!stopButton) return;
+    stopButton.style.display = 'flex';
+    sendButton.style.display = 'none';
+  }
+
+  function hideStopButton() {
+    if (!stopButton) return;
+    stopButton.style.display = 'none';
+    sendButton.style.display = '';
+  }
+
+  if (stopButton) {
+    stopButton.addEventListener('click', stopGeneration);
+  }
+
   function sendMessage() {
     var text = composerInput.value.trim();
-    if (!text || !ws || ws.readyState !== WebSocket.OPEN) return;
+    if (!text) return;
+
+    if (!ws || ws.readyState !== WebSocket.OPEN) {
+      // Queue message for when connection is restored
+      messageQueue.push(text);
+      appendMessage('user', escapeHtml(text));
+      appendMessage('error', 'Message queued \u2014 will send when reconnected.');
+      composerInput.value = '';
+      composerInput.style.height = '';
+      composerInput.style.overflowY = 'hidden';
+      sendButton.disabled = true;
+      updateCharCount();
+      composerInput.focus();
+      scrollToBottom();
+      return;
+    }
+
     var msgId = generateUUID();
     var payload = { type: 'user_input', text: text, message_id: msgId };
     pendingMessages[msgId] = { text: text, timestamp: Date.now() };
@@ -209,6 +255,7 @@
     if (followupChipsEl) { followupChipsEl.remove(); followupChipsEl = null; }
     // Show thinking indicator after a delay (canceled when response arrives).
     showThinkingIndicator();
+    showStopButton();
     composerInput.value = '';
     composerInput.style.height = '';
     composerInput.style.overflowY = 'hidden';
@@ -216,6 +263,19 @@
     updateCharCount();
     composerInput.focus();
     scrollToBottom();
+  }
+
+  /* Flush queued messages on reconnect */
+  function flushMessageQueue() {
+    while (messageQueue.length > 0) {
+      var text = messageQueue.shift();
+      var msgId = generateUUID();
+      var payload = { type: 'user_input', text: text, message_id: msgId };
+      pendingMessages[msgId] = { text: text, timestamp: Date.now() };
+      ws.send(JSON.stringify(payload));
+      showThinkingIndicator();
+      showStopButton();
+    }
   }
 
   composerInput.addEventListener('input', function () {
@@ -279,6 +339,27 @@
     var wrapper = document.createElement('div');
     wrapper.className = 'message message-' + role;
     wrapper.innerHTML = html;
+
+    // Add copy button for user and assistant messages
+    if (role === 'user' || role === 'assistant') {
+      var actions = document.createElement('div');
+      actions.className = 'msg-actions';
+      var copyBtn = document.createElement('button');
+      copyBtn.className = 'msg-action-btn';
+      copyBtn.textContent = 'Copy';
+      copyBtn.title = 'Copy message';
+      copyBtn.addEventListener('click', function (e) {
+        e.stopPropagation();
+        var text = wrapper.textContent || '';
+        navigator.clipboard.writeText(text.trim()).then(function () {
+          copyBtn.textContent = 'Copied!';
+          setTimeout(function () { copyBtn.textContent = 'Copy'; }, 2000);
+        });
+      });
+      actions.appendChild(copyBtn);
+      wrapper.appendChild(actions);
+    }
+
     messagesEl.appendChild(wrapper);
     hideEmptyState();
     scrollToBottom();
@@ -291,22 +372,57 @@
     messagesEl.appendChild(currentBubble);
   }
 
+  /* Batched render: called once per animation frame */
+  function renderBubble() {
+    if (!currentBubble) return;
+    currentBubble.innerHTML = renderMarkdown(currentBubbleContent);
+    renderScheduled = false;
+  }
+
   function appendDelta(text) {
     if (!currentBubble) startAssistantBubble();
     currentBubbleContent += text;
-    currentBubble.innerHTML = renderMarkdown(currentBubbleContent);
+    // Batch renders: only update DOM once per animation frame
+    if (!renderScheduled) {
+      renderScheduled = true;
+      requestAnimationFrame(renderBubble);
+    }
     scrollToBottom();
   }
 
   function finalizeAssistantBubble() {
     if (currentBubble) {
-      currentBubble.innerHTML = renderMarkdown(currentBubbleContent);
+      // Flush any pending render before finalizing
+      if (renderScheduled) {
+        renderScheduled = false;
+        currentBubble.innerHTML = renderMarkdown(currentBubbleContent);
+      }
       enhanceCodeBlocks(currentBubble);
+
+      // Add copy button to assistant message
+      var actions = document.createElement('div');
+      actions.className = 'msg-actions';
+      var copyBtn = document.createElement('button');
+      copyBtn.className = 'msg-action-btn';
+      copyBtn.textContent = 'Copy';
+      copyBtn.title = 'Copy message';
+      copyBtn.addEventListener('click', function (e) {
+        e.stopPropagation();
+        var text = currentBubble.textContent || '';
+        navigator.clipboard.writeText(text.trim()).then(function () {
+          copyBtn.textContent = 'Copied!';
+          setTimeout(function () { copyBtn.textContent = 'Copy'; }, 2000);
+        });
+      });
+      actions.appendChild(copyBtn);
+      currentBubble.appendChild(actions);
+
       currentBubble = null;
       currentBubbleContent = '';
     }
     // Remove thinking indicator when text arrives.
     removeThinkingIndicator();
+    hideStopButton();
   }
 
   // ── Thinking indicator (shows "Thinking…" with elapsed time) ────
@@ -380,51 +496,41 @@
     var suggestions = [];
     var lower = assistantText.toLowerCase();
 
-    // Code-related follow-ups.
-    if (lower.indexOf('error') !== -1 || lower.indexOf('bug') !== -1 || lower.indexOf('fix') !== -1) {
+    // Use word-boundary matching to reduce false positives.
+    if (/\berror\b|\bbug\b|\bfix\b|\bissue\b/.test(lower)) {
       suggestions.push('Show me how to fix this');
       suggestions.push('What caused this error?');
     }
-    if (lower.indexOf('function') !== -1 || lower.indexOf('func ') !== -1 || lower.indexOf('method') !== -1) {
+    if (/\bfunction\b|\bfunc\b|\bmethod\b/.test(lower)) {
       suggestions.push('Can you add error handling?');
-      suggestions.push('Write tests for this');
     }
-    if (lower.indexOf('test') !== -1) {
+    if (/\btest\b/.test(lower)) {
       suggestions.push('Add more edge cases');
-      suggestions.push('Show me a passing example');
     }
-    if (lower.indexOf('```') !== -1 || lower.indexOf('code') !== -1) {
+    if (lower.indexOf('```') !== -1) {
       suggestions.push('Explain this code line by line');
       suggestions.push('Can you simplify this?');
     }
-    if (lower.indexOf('performance') !== -1 || lower.indexOf('slow') !== -1 || lower.indexOf('optimize') !== -1) {
+    if (/\bperformance\b|\bslow\b|\boptimize\b/.test(lower)) {
       suggestions.push('Show me a benchmark');
-      suggestions.push('Any other optimizations?');
     }
-
-    // General follow-ups.
-    if (lower.indexOf('api') !== -1 || lower.indexOf('endpoint') !== -1 || lower.indexOf('rest') !== -1) {
+    if (/\bapi\b|\bendpoint\b|\brest\b/.test(lower)) {
       suggestions.push('Show me the full API spec');
-      suggestions.push('How do I add authentication?');
     }
-    if (lower.indexOf('database') !== -1 || lower.indexOf('sql') !== -1 || lower.indexOf('query') !== -1) {
+    if (/\bdatabase\b|\bsql\b|\bquery\b/.test(lower)) {
       suggestions.push('Show me the migration script');
-      suggestions.push('How to index this for performance?');
     }
-    if (lower.indexOf('config') !== -1 || lower.indexOf('env') !== -1 || lower.indexOf('setting') !== -1) {
+    if (/\bconfig\b|\benv\b|\bsetting\b/.test(lower)) {
       suggestions.push('Show me all config options');
-      suggestions.push('Add a default value');
     }
-    if (lower.indexOf('security') !== -1 || lower.indexOf('vulnerab') !== -1) {
+    if (/\bsecurity\b|\bvulnerab/i.test(lower)) {
       suggestions.push('How to prevent this permanently?');
-      suggestions.push('Check for similar issues');
     }
 
-    // Always provide some generic chips as fallback.
-    if (suggestions.length < 2) {
+    // Generic fallbacks
+    if (suggestions.length < 3) {
       suggestions.push('Can you elaborate?');
       suggestions.push('Show me a complete example');
-      suggestions.push('How does this work under the hood?');
     }
 
     // Deduplicate and limit.
@@ -627,6 +733,29 @@
 
     overlay.appendChild(card);
     document.body.appendChild(overlay);
+
+    // Focus trap: gather focusable elements
+    var focusableEls = card.querySelectorAll('button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])');
+    var firstFocusable = focusableEls[0];
+    var lastFocusable = focusableEls[focusableEls.length - 1];
+    if (firstFocusable) firstFocusable.focus();
+
+    function onKeyDown(e) {
+      if (e.key === 'Escape') { e.preventDefault(); reply('deny'); return; }
+      if (e.key === 'Tab' && focusableEls.length > 0) {
+        if (e.shiftKey) {
+          if (document.activeElement === firstFocusable) { e.preventDefault(); lastFocusable.focus(); }
+        } else {
+          if (document.activeElement === lastFocusable) { e.preventDefault(); firstFocusable.focus(); }
+        }
+      }
+    }
+    overlay.addEventListener('keydown', onKeyDown);
+    // Cleanup listener when overlay is removed
+    var observer = new MutationObserver(function () {
+      if (!document.contains(overlay)) { overlay.removeEventListener('keydown', onKeyDown); observer.disconnect(); }
+    });
+    observer.observe(document.body, { childList: true });
   }
 
   // ── Markdown renderer ────────────────────────────────────
@@ -861,6 +990,24 @@
     });
   }
 
+  function isScrolledToBottom() {
+    return messagesEl.scrollHeight - messagesEl.scrollTop - messagesEl.clientHeight < 60;
+  }
+
+  function updateScrollBottomButton() {
+    if (!scrollBottomBtn) return;
+    if (isScrolledToBottom()) {
+      scrollBottomBtn.classList.remove('scroll-bottom-btn-visible');
+    } else {
+      scrollBottomBtn.classList.add('scroll-bottom-btn-visible');
+    }
+  }
+
+  if (scrollBottomBtn) {
+    scrollBottomBtn.addEventListener('click', function () { scrollToBottom(); });
+    messagesEl.addEventListener('scroll', updateScrollBottomButton, { passive: true });
+  }
+
   // ── Network status detection ─────────────────────────
   var offlineBanner = document.getElementById('offline-banner');
   var networkConfirmedOnline = true; // assume online until proven otherwise
@@ -975,6 +1122,8 @@
       reconnectDelay = 1000;
       hideRateLimitBanner();
       if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
+      // Flush queued messages from offline period
+      flushMessageQueue();
       // Resend any user_input messages that haven't been ack'd yet.
       var now = Date.now();
       var ids = Object.keys(pendingMessages);
@@ -1013,6 +1162,7 @@
           case 'permission_ask': showPermissionDialog(msg); break;
           case 'error':
             finalizeAssistantBubble();
+            hideStopButton();
             if (msg.code === 'rate_limit') {
               showRateLimitBanner(msg.message || 'Rate limited');
             } else {
@@ -1040,8 +1190,13 @@
   }
 
   function setStatus(state) {
+    var labels = {
+      'connected':     '\u2713 connected',
+      'reconnecting':  '\u21bb reconnecting',
+      'disconnected':  '\u2717 disconnected'
+    };
     statusPill.className = 'status-pill status-' + state;
-    statusPill.textContent = state;
+    statusPill.textContent = labels[state] || state;
   }
 
   sidebarToggle.addEventListener('click', function () {
@@ -1055,19 +1210,41 @@
   var sessionMessages = {};    // sessionID → [messages HTML array]
   var CACHED_SESSION_COUNT = 50; // max cached session message lists
 
+  function showSidebarLoading() {
+    if (!sessionList) return;
+    sessionList.innerHTML = '<li class="sidebar-loading">Loading sessions…</li>';
+  }
+
+  function showSidebarEmpty() {
+    if (!sessionList) return;
+    sessionList.innerHTML = '<li class="sidebar-empty">No past sessions</li>';
+  }
+
+  function showSidebarError() {
+    if (!sessionList) return;
+    sessionList.innerHTML = '<li class="sidebar-error">Failed to load sessions <button type="button" class="sidebar-retry-btn" onclick="location.reload()">Retry</button></li>';
+  }
+
   // Load session list from server and render the sidebar.
   function fetchSessions() {
+    showSidebarLoading();
     var req = new XMLHttpRequest();
     req.open('GET', '/api/sessions', true);
     req.onload = function () {
       if (req.status === 200) {
         try {
           var sessions = JSON.parse(req.responseText);
-          renderSessionList(sessions);
-        } catch (_) { /* ignore parse errors */ }
+          if (!sessions || !sessions.length) {
+            showSidebarEmpty();
+          } else {
+            renderSessionList(sessions);
+          }
+        } catch (_) { showSidebarError(); }
+      } else {
+        showSidebarError();
       }
     };
-    req.onerror = function () { /* server might not support sessions endpoint yet */ };
+    req.onerror = function () { showSidebarError(); };
     req.send();
   }
 
@@ -1184,6 +1361,17 @@
   // Fetch sessions on load and periodically.
   fetchSessions();
   setInterval(fetchSessions, 30000); // refresh every 30s
+
+  /* Prune old pending messages every 2 minutes */
+  setInterval(function () {
+    var now = Date.now();
+    var ids = Object.keys(pendingMessages);
+    for (var i = 0; i < ids.length; i++) {
+      if (now - pendingMessages[ids[i]].timestamp > 300000) {
+        delete pendingMessages[ids[i]];
+      }
+    }
+  }, 120000);
 
   setupKeyboardHandling();
   sendButton.disabled = true;
