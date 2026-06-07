@@ -385,6 +385,63 @@ cover but the research showed are important.
 - `go test ./...` passes.
 - The README's Web UI section is up to date.
 
+---
+
+## Phase 9 — Session Persistence (SQLite)
+
+### Goal
+Implement SQLite-backed session storage so conversations survive server restarts and users can search/browse old conversations.
+
+### Tasks
+
+- [x] 9.1 Design SQLite schema for sessions, messages, and tool calls
+  - Sessions table: id, created_at, last_active_at, provider, model, message_count
+  - Messages table: id, session_id, role, content, created_at, tokens_used
+  - Tool calls table: id, message_id, tool_name, input, output, duration_ms
+
+- [x] 9.2 Create internal/session package with SQLite store
+  - Implement SessionStore interface with CRUD operations
+  - Add session creation, listing, searching, deletion
+  - Add message recording and retrieval
+  - Add tool call recording and retrieval
+
+- [ ] 9.3 Migrate in-memory session_store.go to use SQLite
+  - Replace chatSessionStore with SQLite-backed store
+  - Preserve existing API (create, recordUserMessage, recordAssistantReply, list)
+  - Add session persistence across restarts
+
+- [ ] 9.4 Add session search and filtering
+  - Full-text search across session messages
+  - Filter by date range, provider, model
+  - Sort by last active, message count, created date
+
+- [ ] 9.5 Implement session export
+  - Export single session as markdown
+  - Export single session as JSON
+  - Export multiple sessions as zip
+
+- [ ] 9.6 Add session import
+  - Import from JSON format
+  - Import from markdown format
+  - Validate and merge imported sessions
+
+### Success Criteria
+- [ ] Sessions persist across server restarts
+- [ ] Users can search old conversations by text
+- [ ] Users can filter sessions by date/provider/model
+- [ ] Export works for individual sessions (markdown, JSON)
+- [ ] Import works from JSON format
+- [ ] All existing tests pass
+- [ ] New tests cover session persistence
+
+### Technical Notes
+- Use SQLite via modernc.org/sqlite (pure Go, no CGO)
+- Store database in ~/.claw-code/sessions.db
+- Add migration system for schema changes
+- Keep backward compatibility with existing JSON session files
+
+---
+
 ## Blockers
 
 ### ~~All remaining Phase 8 items~~ — RESOLVED 2026-06-03
