@@ -187,6 +187,13 @@ func LoadConfig() *Config {
 	// Detect the active provider from environment variables.
 	cfg.ProviderName = detectProvider()
 
+	// ANTHROPIC_BASE_URL should only apply to the Anthropic provider.
+	// For other providers (e.g. DeepSeek) it would incorrectly override
+	// their own hardcoded base URL.
+	if cfg.ProviderName != "anthropic" {
+		cfg.BaseURL = ""
+	}
+
 	// Map Claude model names to DeepSeek variants when deepseek provider is active.
 	if cfg.ProviderName == "deepseek" {
 		mapped := mapClaudeToDeepSeek(cfg.Model)

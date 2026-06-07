@@ -178,3 +178,48 @@ func emptyCredentialStore() *CredentialStore {
 		Providers: map[string]*ProviderCredentials{},
 	}
 }
+
+func ResolveCredentialsFor(providerName string) (token, method string, err error) {
+	switch providerName {
+	case "anthropic":
+		if key := os.Getenv("ANTHROPIC_API_KEY"); key != "" {
+			return key, "api_key", nil
+		}
+	case "openai":
+		if key := os.Getenv("OPENAI_API_KEY"); key != "" {
+			return key, "api_key", nil
+		}
+	case "deepseek":
+		if key := os.Getenv("DEEPSEEK_TOKEN"); key != "" {
+			return key, "api_key", nil
+		}
+	}
+
+	store, _ := LoadCredentialStore()
+	if cred, ok := store.Providers[providerName]; ok && cred != nil {
+		switch cred.AuthMethod {
+		case "api_key":
+			if cred.APIKey != "" {
+				return cred.APIKey, "api_key", nil
+			}
+		case "oauth":
+			if cred.OAuth != nil {
+				td := cred.OAuth
+				if IsExpired(td) {
+					if td.RefreshToken != "" {
+						td, err = RefreshToken(td.RefreshToken)
+						if err != nil {
+							return "", "", fmt.Errorf("refresh oauth token: %w", err)
+						}
+						_ = SetProviderOAuth(providerName, td)
+					} else {
+						return "", "", fmt.Errorf("oauth token expired; run /login")
+					}
+				}
+				return td.AccessToken, "oauth", nil
+			}
+		}
+	}
+
+	return "", "", fmt.Errorf("no credentials found for %s", providerName)
+}

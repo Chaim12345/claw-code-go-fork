@@ -232,16 +232,33 @@ func saveSessionSilent(dir string, loop *runtime.ConversationLoop) {
 // decide how to handle the error (TUI falls back to NoAuthClient so the
 // user can /login; non-interactive subcommands should fail hard).
 func buildProvider(cfg *runtime.Config) (api.APIClient, error) {
-	provider, token, authMethod, credErr := auth.ResolveCredentials()
-	if credErr != nil {
-		return nil, fmt.Errorf("no credentials found: %w (set ANTHROPIC_API_KEY, OPENAI_API_KEY, or DEEPSEEK_TOKEN)", credErr)
-	}
-	cfg.ProviderName = provider
-	cfg.AuthMethod = authMethod
-	if authMethod == "oauth" {
-		cfg.OAuthToken = token
+	// When the caller explicitly sets --provider, resolve credentials only
+	// for that provider rather than relying on auto-detection. This prevents
+	// ANTHROPIC_API_KEY from hijacking the provider when --provider deepseek
+	// is specified.
+	if cfg.ProviderName != "" {
+		token, method, err := auth.ResolveCredentialsFor(cfg.ProviderName)
+		if err != nil {
+			return nil, fmt.Errorf("no credentials for %s: %w", cfg.ProviderName, err)
+		}
+		cfg.AuthMethod = method
+		if method == "oauth" {
+			cfg.OAuthToken = token
+		} else {
+			cfg.APIKey = token
+		}
 	} else {
-		cfg.APIKey = token
+		provider, token, authMethod, credErr := auth.ResolveCredentials()
+		if credErr != nil {
+			return nil, fmt.Errorf("no credentials found: %w (set ANTHROPIC_API_KEY, OPENAI_API_KEY, or DEEPSEEK_TOKEN)", credErr)
+		}
+		cfg.ProviderName = provider
+		cfg.AuthMethod = authMethod
+		if authMethod == "oauth" {
+			cfg.OAuthToken = token
+		} else {
+			cfg.APIKey = token
+		}
 	}
 
 	client, err := runtime.NewProviderClient(cfg)
@@ -355,6 +372,14 @@ func runWebSubcommand(args []string) {
 	var chatLoopFactory func() *runtime.ConversationLoop
 	if *provider != "" {
 		cfg := runtime.LoadConfig()
+		// Override the auto-detected provider with the explicit --provider flag.
+		// This ensures the BaseURL guard (config.go) clears ANTHROPIC_BASE_URL
+		// for non-Anthropic providers, and ResolveCredentialsFor targets the
+		// right provider.
+		cfg.ProviderName = *provider
+		if cfg.ProviderName != "anthropic" {
+			cfg.BaseURL = "" // clear contaminated ANTHROPIC_BASE_URL
+		}
 		cfg.Autonomous = true
 		cfg.DeltaMode = *delta
 		if *maxTurns > 0 {

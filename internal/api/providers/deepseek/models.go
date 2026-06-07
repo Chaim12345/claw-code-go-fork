@@ -176,7 +176,10 @@ func (wc *WebClient) FetchModelSettings() (map[string]ModelConfig, error) {
 	}
 
 	var probe struct {
+		Code int `json:"code"`
 		Data struct {
+			BizCode int `json:"biz_code"`
+			BizMsg  string `json:"biz_msg"`
 			BizData struct {
 				Settings struct {
 					ModelConfigs struct {
@@ -188,6 +191,13 @@ func (wc *WebClient) FetchModelSettings() (map[string]ModelConfig, error) {
 	}
 	if err := json.Unmarshal(body, &probe); err != nil {
 		return nil, fmt.Errorf("settings parse: %w", err)
+	}
+
+	// DeepSeek's settings endpoint may return biz_code=2 (INVALID_PARAM)
+	// when the endpoint format changes or parameters are wrong. This is
+	// not a fatal error — callers fall back to hard-coded limits.
+	if probe.Data.BizCode == 2 {
+		return make(map[string]ModelConfig), nil
 	}
 
 	out := make(map[string]ModelConfig, 3)

@@ -29,10 +29,18 @@ type CompactionState struct {
 	CompactionCount   int // number of times the session has been compacted
 }
 
-// EstimateTokens roughly estimates the number of tokens in a slice of messages
-// using a simple chars-per-token heuristic. It accounts for text blocks,
-// nested content blocks (tool results), and tool_use input maps.
+// EstimateTokens returns the token count for a slice of messages using the
+// DeepSeek tokenizer when available, falling back to a chars/4 heuristic.
+// Prefer CountMessagesTokens for new code; this wrapper exists for callers
+// that predate the tokenizer integration.
 func EstimateTokens(messages []api.Message) int {
+	return CountMessagesTokens(messages)
+}
+
+// estimateTokensFallback is the original chars-per-token heuristic, kept for
+// reference. CountMessagesTokens uses this as its fallback when the
+// tokenizer is not loaded.
+func estimateTokensFallback(messages []api.Message) int {
 	var total int
 	for _, msg := range messages {
 		for _, cb := range msg.Content {
@@ -270,4 +278,133 @@ func resetProviderSessionAfterCompaction(client api.APIClient) {
 	if r, ok := client.(api.SessionResetter); ok {
 		r.ResetSession()
 	}
+}
+
+// TruncateFIFO removes the oldest messages, keeping only the most recent N
+// messages that fit within fractionBasis of the model's token budget. This is
+// a last-resort recovery strategy when smart compaction and model fallback
+// have both failed. Based on live shootout results (2026-06-07): FIFO works
+// reliably even at 141%+ of the reported token limit — the server's actual
+// rejection threshold is well above the advertised cap.
+//
+// fractionBasis controls how aggressively we trim. 0.50 means keep messages
+// whose estimated tokens total ≤ 50% of the model's MaxInputTokens.
+func TruncateFIFO(session *Session, client api.APIClient, fractionBasis float64) int {
+	if len(session.Messages) == 0 || client == nil {
+		return 0
+	}
+
+	limit := client.MaxInputTokens()
+	if limit <= 0 {
+		limit = 50000 // fallback for clients that don't report MaxInputTokens
+	}
+
+	target := int(float64(limit) * fractionBasis)
+	if target < 500 {
+		target = 500 // don't trim below a reasonable minimum
+	}
+
+	// Walk from newest to oldest, accumulating token estimates.
+	kept := 0
+	cumulative := 0
+	for i := len(session.Messages) - 1; i >= 0; i-- {
+		msgTokens := estimateMessageTokens(session.Messages[i])
+		if cumulative+msgTokens > target {
+			break
+		}
+		cumulative += msgTokens
+		kept++
+	}
+
+	if kept >= len(session.Messages) {
+		return 0 // nothing to trim
+	}
+
+	trimmed := len(session.Messages) - kept
+	newMsgs := make([]api.Message, kept)
+	copy(newMsgs, session.Messages[len(session.Messages)-kept:])
+
+	// Prepend a FIFO truncation notice so the model knows context was lost.
+	notice := api.Message{
+		Role: "user",
+		Content: []api.ContentBlock{
+			{Type: "text", Text: fmt.Sprintf(
+				"[System: Conversation history was truncated (FIFO) to stay within context limits. "+
+					"%d oldest messages were dropped. Some earlier context may be missing.]",
+				trimmed,
+			)},
+		},
+	}
+	session.Messages = append([]api.Message{notice}, newMsgs...)
+	return trimmed
+}
+
+// estimateMessageTokens estimates the token count for a single message.
+// Uses the accurate DeepSeek V3 tokenizer when available, falling back
+// to chars/4 heuristic.
+func estimateMessageTokens(msg api.Message) int {
+	// Try accurate tokenizer first.
+	if TokenizerAvailable() {
+		text := buildMessageText(msg)
+		if tokens := CountTokens(text); tokens > 0 {
+			return tokens
+		}
+	}
+
+	// Fallback: chars/4 heuristic.
+	total := 0
+	for _, cb := range msg.Content {
+		switch cb.Type {
+		case "text":
+			total += len(cb.Text) / charsPerToken
+		case "tool_use":
+			if cb.Input != nil {
+				for k, v := range cb.Input {
+					total += len(k) / charsPerToken
+					if s, ok := v.(string); ok {
+						total += len(s) / charsPerToken
+					}
+				}
+			}
+		}
+		for _, inner := range cb.Content {
+			total += len(inner.Text) / charsPerToken
+		}
+	}
+	if total == 0 {
+		total = 1
+	}
+	return total
+}
+
+// buildMessageText extracts the textual content from a message for token counting.
+func buildMessageText(msg api.Message) string {
+	var parts []string
+	for _, cb := range msg.Content {
+		switch cb.Type {
+		case "text":
+			if cb.Text != "" {
+				parts = append(parts, cb.Text)
+			}
+		case "tool_use":
+			if cb.Input != nil {
+				for k, v := range cb.Input {
+					parts = append(parts, k)
+					if s, ok := v.(string); ok {
+						parts = append(parts, s)
+					}
+				}
+			}
+		}
+		for _, inner := range cb.Content {
+			if inner.Text != "" {
+				parts = append(parts, inner.Text)
+			}
+		}
+	}
+	result := ""
+	for _, p := range parts {
+		result += p
+	}
+	return result
 }
