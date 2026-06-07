@@ -1,37 +1,37 @@
 [
   {
     "id": "1",
-    "content": "Audit backend for performance/robustness gaps (chat_session, server, runtime)",
+    "content": "Add resetProviderSessionAfterCompaction to CompactNow (centralize the reset)",
     "status": "in_progress",
     "priority": "high"
   },
   {
     "id": "2",
-    "content": "Optimize WebSocket connection handling (backpressure, write deadlines)",
+    "content": "Add resetProviderSessionAfterCompaction after model fallback in SendMessage",
     "status": "pending",
     "priority": "high"
   },
   {
     "id": "3",
-    "content": "Improve chat session concurrency and goroutine lifecycle",
+    "content": "Add resetProviderSessionAfterCompaction after model fallback in SendMessageStreaming",
     "status": "pending",
     "priority": "high"
   },
   {
     "id": "4",
-    "content": "Add connection pool / HTTP client reuse for provider calls",
+    "content": "Add resetProviderSessionAfterCompaction to initial compaction blocks in both SendMessage variants",
     "status": "pending",
     "priority": "medium"
   },
   {
     "id": "5",
-    "content": "Harden error handling and graceful degradation",
+    "content": "Remove redundant resetProviderSessionAfterCompaction calls in proactive compaction blocks",
     "status": "pending",
-    "priority": "medium"
+    "priority": "low"
   },
   {
     "id": "6",
-    "content": "Verify build and run tests",
+    "content": "Build and verify compilation",
     "status": "pending",
     "priority": "high"
   }

@@ -24,26 +24,37 @@ import (
 // translate to linearly). This probe establishes ground truth by
 // actually sending prompts and observing success/failure.
 //
+// Direction: probes from LARGE to SMALL. Each model case starts with a
+// `ceiling` (best-guess upper bound from /settings or simply "very large")
+// and tests that first. If the ceiling is accepted, the model's true limit
+// is at least that high. If the ceiling is rejected, we binary-search DOWN
+// between `floor` (smallest known good) and `ceiling` to find the largest
+// size the server actually accepts.
+//
+// Why large-to-small: gives a strong first signal (ceiling fails) that
+// validates the harness is exercising the right code path, and converges
+// to a usable "largest OK" value in O(log n) probes.
+//
 // Method:
 //   - Pick a target model.
-//   - For each candidate prompt size, send a single user message and
-//     wait for either a normal stream-start (request_message_id frame)
-//     or an error.
-//   - Binary search for the largest size that succeeds.
+//   - For each candidate prompt size, send a single user message via the
+//     real StreamResponse path (the same call the agent uses) and wait
+//     for either a normal message_start event or a server error.
+//   - Report the largest size that succeeds and the smallest that fails.
 func TestLiveProbeActualInputLimit(t *testing.T) {
 	if os.Getenv("DEEPSEEK_TOKEN") == "" {
 		t.Skip("DEEPSEEK_TOKEN not set; skipping live test")
 	}
 
 	cases := []struct {
-		name      string
-		model     string
-		lowOK     int // size known to succeed (from a prior run, ~100 chars)
-		highFail  int // size well above /settings limit, must fail
-		settingCh int // configured input_character_limit from /settings
+		name  string
+		model string
+		floor int // smallest known good (probe won't go below this)
+		ceil  int // probe this first; if it fails, binary-search down to floor
 	}{
-		{name: "instant", model: "instant", lowOK: 100, highFail: 3_000_000, settingCh: 2_621_440},
-		{name: "expert", model: "expert", lowOK: 100, highFail: 200_000, settingCh: 163_840},
+		{name: "default", model: "default", floor: 100, ceil: 3_000_000},
+		{name: "expert", model: "expert", floor: 100, ceil: 200_000},
+		{name: "vision", model: "vision", floor: 100, ceil: 3_000_000},
 	}
 
 	for _, tc := range cases {
@@ -61,22 +72,16 @@ func TestLiveProbeActualInputLimit(t *testing.T) {
 				t.Skip("client is not *deepseek.Client")
 			}
 
-			// Verify the configured /settings value matches what we expect
-			// so we know our test harness is correct.
-			settings, err := dsClient.fetchSettings()
-			if err != nil {
-				t.Fatalf("fetchSettings: %v", err)
-			}
-			cfg, ok := settings[tc.model]
-			if !ok {
-				// Map "instant" -> "default" and "expert" -> "expert"
-				if alt, ok2 := settings["default"]; ok2 && tc.model == "instant" {
-					cfg = alt
-				} else {
-					t.Fatalf("settings missing model %q (have: %v)", tc.model, settings)
+			// Best-effort: log /settings if available, but don't fail the
+			// test if it's broken (the endpoint currently returns
+			// biz_code:2 INVALID_PARAM).
+			if settings, err := dsClient.fetchSettings(); err == nil {
+				if cfg, ok := settings[tc.model]; ok {
+					t.Logf("[%s] /settings input_character_limit = %d", tc.name, cfg.InputCharacterLimit)
 				}
+			} else {
+				t.Logf("[%s] /settings unavailable: %v (proceeding with probe)", tc.name, err)
 			}
-			t.Logf("[%s] /settings input_character_limit = %d", tc.name, cfg.InputCharacterLimit)
 
 			// Start with a fresh chat session per model.
 			sid, err := dsClient.web.CreateChatSession()
@@ -85,33 +90,46 @@ func TestLiveProbeActualInputLimit(t *testing.T) {
 			}
 			dsClient.chatSessionID = sid
 			dsClient.parentMessageID = ""
+			// Bypass the client-side pre-flight cap (provider.go:270) so we
+			// measure the SERVER's enforcement, not the client's estimate.
+			// In delta mode the pre-flight is skipped; the prompt we send
+			// is still a single user message (buildPrompt path) since
+			// parentMessageID is empty.
+			dsClient.deltaMode = true
 
-			// Binary search between lowOK and highFail for the largest
-			// size that produces a successful stream.
-			lo, hi := tc.lowOK, tc.highFail
+			// Phase 1: probe the ceiling first.
+			t.Logf("[%s] ceiling probe: size=%d", tc.name, tc.ceil)
+			ok, msg := probeSize(t, dsClient, tc.model, tc.ceil)
+			t.Logf("[%s] size=%d -> ok=%v (%s)", tc.name, tc.ceil, ok, msg)
+			if ok {
+				t.Logf("[%s] RESULT: limit >= %d chars (ceiling accepted, no upper bound within tested range)",
+					tc.name, tc.ceil)
+				return
+			}
+
+			// Phase 2: ceiling failed. Binary-search DOWN between floor and
+			// ceiling to find the largest size that succeeds.
+			lo, hi := tc.floor, tc.ceil
 			lastOK := lo
+			attempts := 1
 			for hi-lo > maxInt(hi/20, 1000) {
 				mid := (lo + hi) / 2
+				attempts++
 				ok, msg := probeSize(t, dsClient, tc.model, mid)
-				t.Logf("[%s] probe size=%d -> ok=%v (%s)", tc.name, mid, ok, msg)
+				t.Logf("[%s] attempt %d: size=%d -> ok=%v (%s)", tc.name, attempts, mid, ok, msg)
 				if ok {
 					lastOK = mid
 					lo = mid
 				} else {
 					hi = mid
 				}
+				if attempts > 12 {
+					t.Logf("[%s] (stopping after %d attempts)", tc.name, attempts)
+					break
+				}
 			}
-
-			// Take the larger of: configured limit, observed lastOK.
-			// The probe's lastOK is the largest size that succeeded.
-			// We log both so we can see if the server's enforced limit
-			// matches the /settings value.
-			t.Logf("[%s] /settings says: %d chars, server actually accepted: %d chars",
-				tc.name, cfg.InputCharacterLimit, lastOK)
-			if lastOK < cfg.InputCharacterLimit/2 {
-				t.Errorf("[%s] server-enforced limit (%d) is less than half of /settings value (%d) — possible new server-side cap",
-					tc.name, lastOK, cfg.InputCharacterLimit)
-			}
+			t.Logf("[%s] RESULT: largest OK = %d chars, smallest fail = %d chars (gap = %d)",
+				tc.name, lastOK, hi, hi-lastOK)
 		})
 	}
 }
@@ -159,7 +177,11 @@ func probeSize(t *testing.T, c *Client, model string, size int) (bool, string) {
 	if !gotStart {
 		return false, "no message_start (no accept, no error)"
 	}
-	return gotText, "streamed"
+	// We only care whether the server accepted the request (gotStart).
+	// Whether text streamed back is a property of model speed/queue, not
+	// input-size enforcement, so report success on start.
+	_ = gotText
+	return gotStart, "streamed"
 }
 
 func maxInt(a, b int) int {

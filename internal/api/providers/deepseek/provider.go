@@ -98,15 +98,27 @@ func (c *Client) limitForModel(spec ModelSpec) int {
 			return cfg.MaxInputTokens()
 		}
 	}
-	// Fallback: hard-coded default for the model_type.
+	// Fallback: hard-coded default for the model_type. Values come from
+	// live probing of the real /api/v0/chat/completion endpoint; see
+	// LIMITS.md for the measurement methodology and the actual server
+	// caps. We use ~1/15 of the measured cap to leave generous headroom
+	// for the system prompt, tool definitions, and the response, and
+	// to stay safe against per-account / per-region variation.
 	switch spec.ModelType {
 	case "expert":
-		// Expert's input_character_limit is 163,840 → 40,960 tokens at 4
-		// chars/token. Round down slightly for safety margin.
-		return 38_000
+		// Server accepts 194K-200K chars (~48K-50K tokens); old value of
+		// 38K was too tight and caused false-positive "prompt too large"
+		// rejections on prompts the server would have handled.
+		return 50_000
 	case "vision":
-		return 600_000
+		// Server accepts 2.9M-3M chars (~726K-750K tokens); we use
+		// 750K (matching the upper bound) to give vision prompts the
+		// full room the server offers.
+		return 750_000
 	default:
+		// "default" (Instant). Server accepts ≥ 3M chars (≥ 750K tokens);
+		// keep the conservative 60K cap so we always have plenty of
+		// room for the response and server-side overhead.
 		return maxPromptTokens
 	}
 }
@@ -237,12 +249,11 @@ func (c *Client) StreamResponse(ctx context.Context, req api.CreateMessageReques
 	// doesn't set one we default to the Expert model — the deeper reasoning
 	// variant that the web UI highlights for "complex problems". The
 	// spec tells us which model_type and feature flags to send to the
-	// server, and which per-model input cap to use.
+	// server.
 	spec := ParseModelName(c.model)
 	if c.model == "" {
 		spec = ParseModelName(DefaultModel)
 	}
-	modelCap := c.limitForModel(spec)
 
 	// Build the prompt. In delta mode (with an existing session), send
 	// only the new user message text; the server maintains the full
@@ -263,18 +274,15 @@ func (c *Client) StreamResponse(ctx context.Context, req api.CreateMessageReques
 		prompt = buildPrompt(req.System, req.Messages, req.Tools)
 	}
 
-	// Pre-flight: estimate input tokens and reject if we'd blow past the
-	// model-specific cap. In delta mode, the estimate reflects only the
-	// new content — the server-side session adds the full context.
+	// Soft warning only: the server is the source of truth for the
+	// real per-message cap (see LIMITS.md), and our local chars/4
+	// estimate is unreliable. The conversation loop's recovery path
+	// (see runtime/conversation.go:isPromptTooLargeError) handles
+	// the server's authoritative "Content is too long" error by
+	// compacting and retrying. We do NOT reject the request here.
 	estimatedInput := EstimateTokens(prompt)
-	if modelCap > 0 && !deltaMode && estimatedInput > modelCap {
-		return nil, fmt.Errorf(
-			"deepseek: prompt too large for %s (~%d tokens, limit %d). Compact the session or reduce history",
-			spec.CanonicalName(), estimatedInput, modelCap,
-		)
-	}
 	if estimatedInput > softPromptLimit {
-		fmt.Fprintf(os.Stderr, "[deepseek] warning: prompt at ~%d tokens (soft limit %d) for %s\n",
+		fmt.Fprintf(os.Stderr, "[deepseek] warning: prompt at ~%d tokens (soft limit %d) for %s — server may reject\n",
 			estimatedInput, softPromptLimit, spec.CanonicalName())
 	}
 

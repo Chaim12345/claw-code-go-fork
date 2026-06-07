@@ -207,22 +207,23 @@ func (loop *ConversationLoop) SendMessage(ctx context.Context, userText string) 
 
 		// Agentic loop: keep going until stop_reason is "end_turn".
 		// If the provider rejects a turn because the prompt is too large,
-		// we compact once and retry before surfacing the error. The retry
+		// we compact and retry before surfacing the error. The retry
 		// budget prevents an infinite loop when compaction cannot shrink
-		// the history below the model cap.
-		const maxPromptRecoveryRetries = 1
+		// the history below the model cap. 3 attempts is enough for the
+		// common case (compact once → server still rejects because the
+		// compacted history is still too large → compact again).
+		const maxPromptRecoveryRetries = 3
 		promptRecoveryRetries := 0
 		modelFallbackAttempted := false
+		fifoTruncationAttempted := false
 	retryTurn:
 		for {
 			stopReason, inTok, outTok, err := loop.runOneTurn(ctx)
 			if err != nil {
-				// Check for transient errors first - these get outer retry loop
-				if isTransientError(err) {
-					lastErr = err
-					break retryTurn // Break to outer retry loop
-				}
-
+				// Check for prompt-too-large FIRST — some providers wrap
+				// the "Content is too long" message in a "stream error: …"
+				// envelope, which would otherwise match isTransientError and
+				// bypass the auto-compaction recovery path entirely.
 				if promptRecoveryRetries < maxPromptRecoveryRetries && isPromptTooLargeError(err) {
 					promptRecoveryRetries++
 					fmt.Fprintf(os.Stderr, "[auto-compact] prompt exceeded model cap; compacting and retrying (%d/%d)\n",
@@ -239,6 +240,19 @@ func (loop *ConversationLoop) SendMessage(ctx context.Context, userText string) 
 					loop.Config.Model = "instant"
 					continue retryTurn
 				}
+				// Last resort: FIFO truncation. Drop oldest messages to
+				// fit within 80% of the model's token budget. Based on
+				// live shootout results this works even at 141%+ of the
+				// reported limit. Only try this once.
+				if !fifoTruncationAttempted {
+					fifoTruncationAttempted = true
+					trimmed := TruncateFIFO(loop.Session, loop.Client, 0.80)
+					if trimmed > 0 {
+						fmt.Fprintf(os.Stderr, "[fifo-truncate] dropped %d oldest messages to fit context limit; retrying\n", trimmed)
+						resetProviderSessionAfterCompaction(loop.Client)
+						continue retryTurn
+					}
+				}
 				return err
 			}
 			totalInput += inTok
@@ -246,6 +260,21 @@ func (loop *ConversationLoop) SendMessage(ctx context.Context, userText string) 
 
 			if stopReason != "tool_use" {
 				break
+			}
+
+			// Proactive compaction check: after each tool-use turn the
+			// session grows (assistant message + tool results), so
+			// re-check the token budget before the next API call.
+			// Without this, the only safety net is the reactive
+			// isPromptTooLargeError catch — which may fire after the
+			// provider has already rejected the request.
+			if ShouldCompact(totalInput, loop.Session.Messages, loop.Config, loop.Client) {
+				if summary, cerr := loop.CompactNow(ctx); cerr != nil {
+					fmt.Fprintf(os.Stderr, "[compact] warning: %v\n", cerr)
+				} else if summary != "" {
+					fmt.Fprintf(os.Stderr, "[compact] proactive compaction during agentic loop (%d chars)\n", len(summary))
+					resetProviderSessionAfterCompaction(loop.Client)
+				}
 			}
 		}
 
@@ -532,22 +561,22 @@ func (loop *ConversationLoop) SendMessageStreaming(ctx context.Context, userText
 
 		// Agentic loop: keep going until stop_reason is "end_turn".
 		// If the provider rejects a turn because the prompt is too large,
-		// compact once and retry before surfacing the error. Mirrors the
+		// compact and retry before surfacing the error. Mirrors the
 		// same recovery path in SendMessage so both the TUI and
-		// autonomous (RunTask) paths benefit from it.
-		const maxStreamingPromptRecoveryRetries = 1
+		// autonomous (RunTask) paths benefit from it. 3 attempts is
+		// enough for the common case where one compaction isn't enough.
+		const maxStreamingPromptRecoveryRetries = 3
 		streamingPromptRecoveryRetries := 0
 		streamingModelFallbackAttempted := false
+		streamingFifoTruncationAttempted := false
 	streamingRetryTurn:
 		for {
 			stopReason, inTok, outTok, err := loop.runOneTurnStreaming(ctx, events)
 			if err != nil {
-				// Check for transient errors first - these get outer retry loop
-				if isTransientError(err) {
-					lastErr = err
-					break streamingRetryTurn // Break to outer retry loop
-				}
-
+				// Check for prompt-too-large FIRST — same rationale as
+				// SendMessage: providers wrap "Content is too long"
+				// in "stream error: …" which would match isTransientError
+				// and bypass the auto-compaction recovery path.
 				if streamingPromptRecoveryRetries < maxStreamingPromptRecoveryRetries && isPromptTooLargeError(err) {
 					streamingPromptRecoveryRetries++
 					fmt.Fprintf(os.Stderr, "[auto-compact] prompt exceeded model cap; compacting and retrying (%d/%d)\n",
@@ -565,6 +594,19 @@ func (loop *ConversationLoop) SendMessageStreaming(ctx context.Context, userText
 					loop.Config.Model = "instant"
 					continue streamingRetryTurn
 				}
+				// Last resort: FIFO truncation. Drop oldest messages to
+				// fit within 80% of the model's token budget. Based on
+				// live shootout results this works even at 141%+ of the
+				// reported limit. Only try this once.
+				if !streamingFifoTruncationAttempted {
+					streamingFifoTruncationAttempted = true
+					trimmed := TruncateFIFO(loop.Session, loop.Client, 0.80)
+					if trimmed > 0 {
+						fmt.Fprintf(os.Stderr, "[fifo-truncate] dropped %d oldest messages to fit context limit; retrying\n", trimmed)
+						resetProviderSessionAfterCompaction(loop.Client)
+						continue streamingRetryTurn
+					}
+				}
 				events <- TurnEvent{Type: TurnEventError, Err: err}
 				return err
 			}
@@ -573,6 +615,21 @@ func (loop *ConversationLoop) SendMessageStreaming(ctx context.Context, userText
 
 			if stopReason != "tool_use" {
 				break
+			}
+
+			// Proactive compaction check: after each tool-use turn the
+			// session grows (assistant message + tool results), so
+			// re-check the token budget before the next API call.
+			// Without this, the only safety net is the reactive
+			// isPromptTooLargeError catch — which may fire after the
+			// provider has already rejected the request.
+			if ShouldCompact(totalInput, loop.Session.Messages, loop.Config, loop.Client) {
+				if summary, cerr := loop.CompactNow(ctx); cerr != nil {
+					fmt.Fprintf(os.Stderr, "[compact] warning: %v\n", cerr)
+				} else if summary != "" {
+					fmt.Fprintf(os.Stderr, "[compact] proactive compaction during agentic loop (%d chars)\n", len(summary))
+					resetProviderSessionAfterCompaction(loop.Client)
+				}
 			}
 		}
 
@@ -1006,6 +1063,15 @@ func (loop *ConversationLoop) CompactNow(ctx context.Context) (string, error) {
 	loop.Compaction.CompactionCount++
 	contMsg := GetContinuationMessage(summary)
 	loop.Session.Messages = append([]api.Message{contMsg}, loop.Session.Messages...)
+
+	// Reset the provider's server-side session after client-side
+	// trimming. For delta mode (DeepSeek) this clears the
+	// parent_message_id chain so the server doesn't continue to
+	// track the full pre-compaction conversation. Without this,
+	// the server-side context silently overflows even though the
+	// client thinks it has been compacted.
+	resetProviderSessionAfterCompaction(loop.Client)
+
 	return summary, nil
 }
 
@@ -1264,12 +1330,18 @@ func (loop *ConversationLoop) MCPList() string {
 // SendMessage watches for these and triggers a compaction + retry. Keep
 // the list tight — false positives would silently compact when the real
 // issue is something else.
+//
+// Verified against live DeepSeek web API (2026-06-07): the server returns
+// "Content is too long. Please shorten it and try again." in a transient
+// stream error, which the WebClient wraps and surfaces as a Go error.
+// The substring "content is too long" catches it case-insensitively.
 var promptTooLargeMarkers = []string{
 	"prompt too large",
 	"context length exceeded",
 	"maximum context length",
 	"context_length_exceeded",
 	"input is too long",
+	"content is too long",
 	"length limit reached",
 	"length limit",
 }
@@ -1299,6 +1371,16 @@ func isTransientError(err error) bool {
 	
 	// Context cancellation is never transient - user explicitly cancelled
 	if strings.Contains(s, "context canceled") || strings.Contains(s, "context deadline exceeded") {
+		return false
+	}
+
+	// Prompt-too-large errors are never transient — they require
+	// compaction, not retries. Without this guard, the DeepSeek
+	// provider's "stream error: deepseek: Content is too long"
+	// message (which contains both "stream error" and "content is
+	// too long") would match the transient check below and bypass
+	// the auto-compaction recovery path.
+	if isPromptTooLargeError(err) {
 		return false
 	}
 	

@@ -29,37 +29,78 @@ type CompactionState struct {
 	CompactionCount   int // number of times the session has been compacted
 }
 
-// EstimateTokens roughly estimates the number of tokens in a slice of messages
-// using a simple chars-per-token heuristic. It accounts for text blocks,
-// nested content blocks (tool results), and tool_use input maps.
+// EstimateTokens estimates the number of tokens in a slice of messages.
+// When the DeepSeek V3 tokenizer is available (tokenizer.json bundled),
+// it uses accurate BPE token counting. Falls back to chars/4 heuristic
+// when the tokenizer is unavailable.
 func EstimateTokens(messages []api.Message) int {
-	var total int
-	for _, msg := range messages {
-		for _, cb := range msg.Content {
-			switch cb.Type {
-			case "text":
-				total += len(cb.Text) / charsPerToken
-			case "tool_use":
-				// Tool use blocks carry their input as a map; estimate
-				// from the serialised form. The provider sends this as
-				// input_json_delta so counting chars/4 is consistent with
-				// how we estimate streamed output.
-				if cb.Input != nil {
-					for k, v := range cb.Input {
-						total += len(k) / charsPerToken
-						if s, ok := v.(string); ok {
-							total += len(s) / charsPerToken
-						}
+	text := buildMessagesText(messages)
+	return dsTokenizer.CountTokens(text)
+}
+
+// buildMessageText converts a single api.Message to the text
+// representation that the tokenizer will count.
+func buildMessageText(msg api.Message) string {
+	var sb strings.Builder
+	sb.WriteString(msg.Role)
+	sb.WriteByte('\n')
+	for _, cb := range msg.Content {
+		switch cb.Type {
+		case "text":
+			sb.WriteString(cb.Text)
+		case "tool_use":
+			sb.WriteString(cb.Name)
+			if cb.Input != nil {
+				for k, v := range cb.Input {
+					sb.WriteString(k)
+					if s, ok := v.(string); ok {
+						sb.WriteString(s)
 					}
 				}
 			}
-			// Nested content blocks (tool_result inner blocks)
+		case "tool_result":
+			// tool_result blocks carry their text in inner Content blocks.
+			// Adding an explicit case makes the intent clear and guards
+			// against future data-model changes where Text might be set directly.
+		}
+		for _, inner := range cb.Content {
+			sb.WriteString(inner.Text)
+		}
+	}
+	return sb.String()
+}
+
+// buildMessagesText flattens a message list into a single string for
+// accurate token counting. It concatenates role+content for each
+// message, matching how the DeepSeek API serializes messages.
+func buildMessagesText(messages []api.Message) string {
+	var sb strings.Builder
+	for _, msg := range messages {
+		sb.WriteString(msg.Role)
+		sb.WriteByte('\n')
+		for _, cb := range msg.Content {
+			switch cb.Type {
+			case "text":
+				sb.WriteString(cb.Text)
+			case "tool_use":
+				sb.WriteString(cb.Name)
+				if cb.Input != nil {
+					for k, v := range cb.Input {
+						sb.WriteString(k)
+						if s, ok := v.(string); ok {
+							sb.WriteString(s)
+						}
+					}
+				}
+			case "tool_result":
+				// tool_result blocks carry their text in inner Content blocks.
+			}
 			for _, inner := range cb.Content {
-				total += len(inner.Text) / charsPerToken
+				sb.WriteString(inner.Text)
 			}
 		}
 	}
-	return total
+	return sb.String()
 }
 
 // ShouldCompact returns true when the session should be compacted.
@@ -73,40 +114,41 @@ func EstimateTokens(messages []api.Message) int {
 // don't silently ignore server-side context growth.
 //
 // The threshold is computed against the client's MaxInputTokens() when the
-// client supports it (non-zero), then cfg.CompactionMaxInputTokens, then
-// cfg.MaxTokens as a last resort. Providers with very large context windows
-// (e.g. DeepSeek's web API) advertise their real limit via the client
-// interface so we don't compact based on the per-turn output budget.
+// client supports it (non-zero), then cfg.CompactionMaxInputTokens. When
+// neither is available a conservative default of 50000 is used — this is a
+// sensible floor for most modern LLMs (even small models have ≥128k context).
+// cfg.MaxTokens is NOT used because it represents the output token budget,
+// not the input context window (e.g. 8192 output vs 65536 input).
+//
+// The inputTokens parameter is treated as a hint. When it's ≤0 or stale
+// (i.e. from a prior turn's LastInputTokens rather than the current
+// message list), the function falls back to EstimateTokens(messages) which
+// computes a fresh chars/4 estimate of the full message list. Callers
+// should pass 0 or the current estimate to get an accurate comparison.
 func ShouldCompact(inputTokens int, messages []api.Message, cfg *Config, client api.APIClient) bool {
 	if !cfg.CompactionEnabled {
 		return false
 	}
-	if inputTokens <= 0 {
-		inputTokens = EstimateTokens(messages)
+
+	// Always compute a fresh estimate from the message list. Use the
+	// passed-in inputTokens only when it's more recent than the
+	// message-list estimate — this guards against stale LastInputTokens
+	// from a prior SendMessage call.
+	estimatedFromMessages := EstimateTokens(messages)
+	if inputTokens <= 0 || estimatedFromMessages > inputTokens {
+		inputTokens = estimatedFromMessages
 	}
-	// In delta mode the API-reported input token count reflects only
-	// the delta prompt (system + tools + last message), typically
-	// 2-3K tokens. The server tracks the full conversation, so we
-	// must estimate from the complete message list. Without this
-	// guard, compaction never triggers and the server-side context
-	// silently overflows.
-	//
-	// Detection: if delta mode is explicitly enabled, always use the
-	// message-list estimate. As a secondary heuristic for providers
-	// that may run delta-like without the explicit flag, fall back
-	// to comparing the reported input against the full estimate —
-	// a >5x ratio is almost certainly a delta/non-delta mismatch.
+
+	// Delta-mode detection: when the API-reported input token count is
+	// far below the full message-list estimate, we're in delta mode and
+	// the server tracks state we don't see. Always use the full estimate
+	// in that case so we don't silently ignore server-side context growth.
 	if cfg.DeltaMode {
-		inputTokens = EstimateTokens(messages)
-	} else {
-		estimatedFromMessages := EstimateTokens(messages)
-		if estimatedFromMessages > inputTokens*5 {
-			// The full message list is >5x larger than the reported
-			// input — almost certainly delta mode. Use the estimate.
-			inputTokens = estimatedFromMessages
-		}
+		inputTokens = estimatedFromMessages
 	}
-	// Prefer the client's own limit (single source of truth for the model).
+
+	// Basis: prefer client.MaxInputTokens() (single source of truth),
+	// then cfg.CompactionMaxInputTokens, then a conservative default.
 	basis := 0
 	if client != nil {
 		basis = client.MaxInputTokens()
@@ -115,7 +157,7 @@ func ShouldCompact(inputTokens int, messages []api.Message, cfg *Config, client 
 		basis = cfg.CompactionMaxInputTokens
 	}
 	if basis <= 0 {
-		basis = cfg.MaxTokens
+		basis = 50000 // conservative default: modern LLMs have ≥128k context
 	}
 	threshold := int(float64(basis) * cfg.CompactionThreshold)
 	return inputTokens >= threshold
@@ -257,6 +299,103 @@ func GetContinuationMessage(summary string) api.Message {
 			{Type: "text", Text: text},
 		},
 	}
+}
+
+// TruncateFIFO removes the oldest messages, keeping only the most recent N
+// messages that fit within fractionBasis of the model's token budget. This is
+// a last-resort recovery strategy when smart compaction and model fallback
+// have both failed. Based on live shootout results (2026-06-07): FIFO works
+// reliably even at 141%+ of the reported token limit — the server's actual
+// rejection threshold is well above the advertised cap.
+//
+// fractionBasis controls how aggressively we trim. 0.50 means keep messages
+// whose estimated tokens total ≤ 50% of the model's MaxInputTokens.
+func TruncateFIFO(session *Session, client api.APIClient, fractionBasis float64) int {
+	if len(session.Messages) == 0 || client == nil {
+		return 0
+	}
+
+	limit := client.MaxInputTokens()
+	if limit <= 0 {
+		limit = 50000 // fallback for clients that don't report MaxInputTokens
+	}
+
+	target := int(float64(limit) * fractionBasis)
+	if target < 500 {
+		target = 500 // don't trim below a reasonable minimum
+	}
+
+	// Walk from newest to oldest, accumulating token estimates.
+	kept := 0
+	cumulative := 0
+	for i := len(session.Messages) - 1; i >= 0; i-- {
+		msgTokens := estimateMessageTokens(session.Messages[i])
+		if cumulative+msgTokens > target {
+			break
+		}
+		cumulative += msgTokens
+		kept++
+	}
+
+	if kept >= len(session.Messages) {
+		return 0 // nothing to trim
+	}
+
+	trimmed := len(session.Messages) - kept
+	newMsgs := make([]api.Message, kept)
+	copy(newMsgs, session.Messages[len(session.Messages)-kept:])
+
+	// Prepend a FIFO truncation notice so the model knows context was lost.
+	notice := api.Message{
+		Role: "user",
+		Content: []api.ContentBlock{
+			{Type: "text", Text: fmt.Sprintf(
+				"[System: Conversation history was truncated (FIFO) to stay within context limits. "+
+					"%d oldest messages were dropped. Some earlier context may be missing.]",
+				trimmed,
+			)},
+		},
+	}
+	session.Messages = append([]api.Message{notice}, newMsgs...)
+	return trimmed
+}
+
+// estimateMessageTokens estimates the token count for a single message.
+// Uses the accurate DeepSeek V3 tokenizer when available, falling back
+// to chars/4 heuristic.
+func estimateMessageTokens(msg api.Message) int {
+	// Try accurate tokenizer first.
+	if dsTokenizer != nil {
+		text := buildMessageText(msg)
+		if tokens := dsTokenizer.CountTokens(text); tokens > 0 {
+			return tokens
+		}
+	}
+
+	// Fallback: chars/4 heuristic.
+	total := 0
+	for _, cb := range msg.Content {
+		switch cb.Type {
+		case "text":
+			total += len(cb.Text) / charsPerToken
+		case "tool_use":
+			if cb.Input != nil {
+				for k, v := range cb.Input {
+					total += len(k) / charsPerToken
+					if s, ok := v.(string); ok {
+						total += len(s) / charsPerToken
+					}
+				}
+			}
+		}
+		for _, inner := range cb.Content {
+			total += len(inner.Text) / charsPerToken
+		}
+	}
+	if total == 0 {
+		total = 1
+	}
+	return total
 }
 
 // resetProviderSessionAfterCompaction calls ResetSession on the provider
