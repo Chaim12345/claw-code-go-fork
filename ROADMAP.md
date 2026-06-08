@@ -528,14 +528,14 @@ When a user returns after a break, inject context from their previous sessions s
 
 - [x] 11.1 Add `GetRecentSessions(limit int) ([]*Session, error)` to SessionStore
 - [x] 11.2 Add `GetSessionSummary(id string) (string, error)` — returns condensed summary of session (last N messages, key decisions made)
-- [ ] 11.3 Update assembler to include "Recent Sessions" section
-- [ ] 11.4 Cap session history context at 2K tokens
-- [ ] 11.5 Add tests for session history context
+ - [x] 11.3 Update assembler to include "Recent Sessions" section
+ - [x] 11.4 Cap session history context at 2K tokens
+ - [x] 11.5 Add tests for session history context
 
 ### Success Criteria
-- [ ] After returning, AI knows what was discussed last session
-- [ ] Token budget stays within limits
-- [ ] No performance degradation on session creation
+- [x] After returning, AI knows what was discussed last session
+- [x] Token budget stays within limits
+- [x] No performance degradation on session creation
 
 ---
 
