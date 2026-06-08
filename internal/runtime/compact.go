@@ -93,24 +93,29 @@ func ShouldCompact(inputTokens int, messages []api.Message, cfg *Config, client 
 		inputTokens = EstimateTokens(messages)
 	}
 	// In delta mode the API-reported input token count reflects only
-	// the delta prompt (system + tools + last message), typically
-	// 2-3K tokens. The server tracks the full conversation, so we
-	// must estimate from the complete message list. Without this
-	// guard, compaction never triggers and the server-side context
-	// silently overflows.
+	// In delta mode (and the DeepSeek web API, which uses server-side
+	// conversation tracking regardless of the DeltaMode flag), the
+	// API-reported input token count reflects only the delta prompt
+	// (system + tools + last message), typically 2-3K tokens per turn.
+	// The server tracks the full conversation, so we must estimate from
+	// the complete message list.
 	//
-	// Detection: if delta mode is explicitly enabled, always use the
-	// message-list estimate. As a secondary heuristic for providers
-	// that may run delta-like without the explicit flag, fall back
-	// to comparing the reported input against the full estimate —
-	// a >5x ratio is almost certainly a delta/non-delta mismatch.
+	// Detection strategy:
+	//   1. If DeltaMode is explicitly enabled, always use the estimate.
+	//   2. Otherwise, if the full message-list estimate exceeds the
+	//      reported input, the provider is almost certainly using
+	//      server-side conversation tracking (delta-like). Use the
+	//      estimate. A true full-history API would report input >=
+	//      estimate since the estimate is a lower bound.
+	//      The old 5x heuristic failed because accumulated per-turn
+	//      delta input (sum of ~2-3K/turn across N turns) eventually
+	//      exceeds estimatedFromMessages / 5, making the ratio < 5x
+	//      and preventing compaction from ever triggering.
 	if cfg.DeltaMode {
 		inputTokens = EstimateTokens(messages)
 	} else {
 		estimatedFromMessages := EstimateTokens(messages)
-		if estimatedFromMessages > inputTokens*5 {
-			// The full message list is >5x larger than the reported
-			// input — almost certainly delta mode. Use the estimate.
+		if estimatedFromMessages > inputTokens {
 			inputTokens = estimatedFromMessages
 		}
 	}

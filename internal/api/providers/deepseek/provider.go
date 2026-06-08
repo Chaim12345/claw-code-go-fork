@@ -187,7 +187,7 @@ func isLengthLimitError(err error) bool {
 		return false
 	}
 	low := strings.ToLower(err.Error())
-	return strings.Contains(low, "length limit reached") || strings.Contains(low, "length limit")
+	return strings.Contains(low, "length limit reached") || strings.Contains(low, "length limit") || strings.Contains(low, "content is too long")
 }
 
 // debugDeepSeek enables debug logging when DEEPSEEK_DEBUG=1
@@ -502,23 +502,30 @@ func (c *Client) StreamResponse(ctx context.Context, req api.CreateMessageReques
 				break
 			}
 			lastErr = err
-			if !isTransient(err.Error()) {
-				break
-			}
-			fmt.Fprintf(os.Stderr, "[deepseek] transient error: %v\n", err)
-		}
-		if err != nil {
-			// Check if this is a session error and reset for recovery
-			if isSessionError(err.Error()) {
-				debugLog("Session error detected, resetting session: %v", err)
-				c.resetSession()
-			}
-			send(api.StreamEvent{
-				Type:         api.EventError,
-				ErrorMessage: fmt.Sprintf("deepseek: %s", err.Error()),
-			})
-			return
-		}
+	// Prompt-too-large errors must propagate immediately so the
+	// conversation loop can auto-compact. isTransient would match
+	// "stream error" in "stream error: deepseek: Content is too long"
+	// and swallow the error in a retry loop — preventing compaction.
+	if isLengthLimitError(err) {
+		break
+	}
+	if !isTransient(err.Error()) {
+		break
+	}
+	fmt.Fprintf(os.Stderr, "[deepseek] transient error: %v\n", err)
+ }
+ if err != nil {
+	// Check if this is a session error and reset for recovery
+	if isSessionError(err.Error()) {
+		debugLog("Session error detected, resetting session: %v", err)
+		c.resetSession()
+	}
+	send(api.StreamEvent{
+		Type:       api.EventError,
+		ErrorMessage: fmt.Sprintf("deepseek: %s", err.Error()),
+	})
+	return
+}
 		if newID != "" {
 			c.mu.Lock()
 			c.parentMessageID = newID
