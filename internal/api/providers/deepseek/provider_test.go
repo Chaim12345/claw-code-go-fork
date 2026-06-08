@@ -730,3 +730,92 @@ func TestTrimFinishedSentinel(t *testing.T) {
 		}
 	}
 }
+
+// TestParseSSEDetectsRawMuteJSON verifies that parseSSE detects a raw JSON
+// mute response (no "data:" prefix) and emits an error event instead of
+// silently skipping it. This is the primary fix for the "empty 200 on mute"
+// bug — the DeepSeek server returns a JSON body without SSE framing when
+// the user is rate-limited.
+func TestParseSSEDetectsRawMuteJSON(t *testing.T) {
+	const body = `{"code":0,"msg":"","data":{"biz_code":5,"biz_msg":"user is muted","biz_data":{"is_muted":1,"mute_until":1735689600}}}`
+	var got []StreamEvent
+	parseSSE(strings.NewReader(body), func(ev StreamEvent) bool {
+		got = append(got, ev)
+		return true
+	})
+	if len(got) != 1 {
+		t.Fatalf("expected 1 error event, got %d: %+v", len(got), got)
+	}
+	if got[0].Event != "error" {
+		t.Errorf("event type = %q, want %q", got[0].Event, "error")
+	}
+	if !strings.Contains(got[0].Data, "user is muted") {
+		t.Errorf("event data = %q, want it to contain 'user is muted'", got[0].Data)
+	}
+}
+
+// TestParseSSEDetectsRawMsgError verifies that a raw JSON response with a
+// top-level "msg" error field (but no biz_msg) is also caught.
+func TestParseSSEDetectsRawMsgError(t *testing.T) {
+	const body = `{"code":1,"msg":"session expired","data":null}`
+	var got []StreamEvent
+	parseSSE(strings.NewReader(body), func(ev StreamEvent) bool {
+		got = append(got, ev)
+		return true
+	})
+	if len(got) != 1 {
+		t.Fatalf("expected 1 error event, got %d: %+v", len(got), got)
+	}
+	if got[0].Event != "error" {
+		t.Errorf("event type = %q, want %q", got[0].Event, "error")
+	}
+	if !strings.Contains(got[0].Data, "session expired") {
+		t.Errorf("event data = %q, want it to contain 'session expired'", got[0].Data)
+	}
+}
+
+// TestParseSSESkipsNonErrorNonDataLines verifies that parseSSE still silently
+// skips lines that are neither "data:" prefixed nor raw JSON error objects.
+func TestParseSSESkipsNonErrorNonDataLines(t *testing.T) {
+	const body = `: this is a comment
+event: ping
+
+data: {"p":"response/fragments","o":"APPEND","v":[{"content":"hello"}]}
+`
+	var got []StreamEvent
+	parseSSE(strings.NewReader(body), func(ev StreamEvent) bool {
+		got = append(got, ev)
+		return true
+	})
+	// Should only get the content event from the data: line
+	if len(got) != 1 {
+		t.Fatalf("expected 1 content event, got %d: %+v", len(got), got)
+	}
+	if got[0].Event != "content" {
+		t.Errorf("event type = %q, want %q", got[0].Event, "content")
+	}
+}
+
+// TestIsRateLimitErrorMuted verifies that "user is muted" is detected as a
+// rate limit error, so the provider's retry+rotation logic kicks in.
+func TestIsRateLimitErrorMuted(t *testing.T) {
+	cases := []struct {
+		input string
+		want  bool
+	}{
+		{"user is muted", true},
+		{"User Is Muted", true},
+		{"deepseek: user is muted (retry after 2025-01-01T00:00:00Z)", true},
+		{"is_muted", true},
+		{"too frequent", true},
+		{"server is busy", true},
+		{"normal error", false},
+		{"connection reset", false},
+	}
+	for _, c := range cases {
+		got := IsRateLimitError(c.input)
+		if got != c.want {
+			t.Errorf("IsRateLimitError(%q) = %v, want %v", c.input, got, c.want)
+		}
+	}
+}

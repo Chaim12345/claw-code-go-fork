@@ -87,7 +87,9 @@ func IsRateLimitError(errMsg string) bool {
 		strings.Contains(low, "message is being generated") ||
 		strings.Contains(low, "try again later") ||
 		strings.Contains(low, "quota") ||
-		strings.Contains(low, "429")
+		strings.Contains(low, "429") ||
+		strings.Contains(low, "user is muted") ||
+		strings.Contains(low, "is_muted")
 }
 
 // LoadAuth resolves a DeepSeek auth token from one of:
@@ -400,7 +402,6 @@ func (wc *WebClient) ChatCompletionStream(opts CompletionOpts, handler StreamHan
 	if powHeader != "" {
 		req.Header.Set("x-ds-pow-response", powHeader)
 	}
-
 	resp, err := wc.client.Do(req)
 	if err != nil {
 		return "", fmt.Errorf("chat completion: %w", err)
@@ -410,6 +411,47 @@ func (wc *WebClient) ChatCompletionStream(opts CompletionOpts, handler StreamHan
 	if resp.StatusCode != 200 {
 		body, _ := io.ReadAll(resp.Body)
 		return "", fmt.Errorf("completion status %d: %s", resp.StatusCode, string(body))
+	}
+	// Check Content-Type: if the server returned a non-SSE response
+	// (e.g. a mute/rate-limit JSON body like {"code":0,"data":{"biz_code":5,"biz_msg":"user is muted"}}),
+	// parse it as a JSON error instead of feeding it to parseSSE which
+	// would silently skip lines without the "data:" prefix.
+	ct := resp.Header.Get("Content-Type")
+	if !strings.Contains(ct, "text/event-stream") {
+		body, _ := io.ReadAll(resp.Body)
+		errMsg := strings.TrimSpace(string(body))
+		// Try to extract a human-readable message from the JSON.
+		var parsed struct {
+			Code int `json:"code"`
+			Msg  string `json:"msg"`
+			Data struct {
+				BizCode int    `json:"biz_code"`
+				BizMsg  string `json:"biz_msg"`
+				BizData struct {
+					IsMuted  int   `json:"is_muted"`
+					MuteUntil int64 `json:"mute_until"`
+				} `json:"biz_data"`
+			} `json:"data"`
+		}
+		if jsonErr := json.Unmarshal(body, &parsed); jsonErr == nil {
+			if parsed.Data.BizMsg != "" {
+				errMsg = parsed.Data.BizMsg
+				if parsed.Data.BizData.IsMuted == 1 && parsed.Data.BizData.MuteUntil > 0 {
+					retryAt := time.Unix(parsed.Data.BizData.MuteUntil, 0)
+					errMsg = fmt.Sprintf("%s (retry after %s)", errMsg, retryAt.Format(time.RFC3339))
+				}
+			} else if parsed.Msg != "" {
+				errMsg = parsed.Msg
+			}
+		}
+		if errMsg == "" {
+			errMsg = fmt.Sprintf("unexpected content-type %q with empty body", ct)
+		}
+		// Detect mute/rate-limit for the retry+rotation logic upstream.
+		if strings.Contains(strings.ToLower(errMsg), "muted") || strings.Contains(strings.ToLower(errMsg), "rate") {
+			return "", fmt.Errorf("deepseek: %s", errMsg)
+		}
+	return "", fmt.Errorf("deepseek: non-SSE response (content-type %q): %s", ct, errMsg)
 	}
 
 	var lastID string
@@ -450,7 +492,26 @@ func parseSSE(r io.Reader, handler StreamHandler) {
 
 	for scanner.Scan() {
 		line := scanner.Text()
+		// Handle raw JSON lines without "data:" prefix (e.g. mute responses):
+		//   {"code":0,"msg":"","data":{"biz_code":5,"biz_msg":"user is muted",...}}
+		// These bypass the SSE protocol and would otherwise be silently skipped.
 		if !strings.HasPrefix(line, "data:") {
+			trimmed := strings.TrimSpace(line)
+			if strings.HasPrefix(trimmed, "{") {
+				var raw map[string]interface{}
+				if json.Unmarshal([]byte(trimmed), &raw) == nil {
+					if data, _ := raw["data"].(map[string]interface{}); data != nil {
+						if bizMsg, _ := data["biz_msg"].(string); bizMsg != "" {
+							handler(StreamEvent{Event: "error", Data: bizMsg})
+							return
+						}
+					}
+					if msg, _ := raw["msg"].(string); msg != "" {
+						handler(StreamEvent{Event: "error", Data: msg})
+						return
+					}
+				}
+			}
 			continue
 		}
 		data := strings.TrimSpace(strings.TrimPrefix(line, "data:"))

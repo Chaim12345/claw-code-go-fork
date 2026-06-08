@@ -268,6 +268,7 @@ func handleChatCompletions(w http.ResponseWriter, r *http.Request, client api.AP
 		writeOpenAIError(w, r.URL.Path, "invalid_request_error", fmt.Sprintf("bad request: %v", err), "", http.StatusBadRequest)
 		return
 	}
+	fmt.Fprintf(os.Stderr, "[proxy] Incoming body: %s\n", string(body))
 
 	// Resolve max_tokens: prefer max_completion_tokens over max_tokens (OpenAI v2 naming).
 	maxTokens := 4096
@@ -281,6 +282,12 @@ func handleChatCompletions(w http.ResponseWriter, r *http.Request, client api.AP
 	if model == "" {
 		model = defaultModel
 	}
+	// Map the model name to the DeepSeek API's model_type. The provider
+	// calls ParseModelName internally, but we log the mapping here so
+	// the operator can verify the proxy is interpreting model names correctly.
+	spec := deepseekprovider.ParseModelName(model)
+	fmt.Fprintf(os.Stderr, "[proxy] model remap: %q -> model_type=%q thinking=%v search=%v (%s)\n",
+		model, spec.ModelType, spec.ThinkingEnabled, spec.SearchEnabled, spec.CanonicalName())
 	stream := req.Stream != nil && *req.Stream
 
 	// Extract system message and convert messages.
@@ -310,6 +317,7 @@ func handleChatCompletions(w http.ResponseWriter, r *http.Request, client api.AP
 		Tools:     tools,
 		Stream:    stream,
 	}
+	fmt.Fprintf(os.Stderr, "[proxy] Constructed internalReq: %+v\n", internalReq)
 
 	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Minute)
 	defer cancel()
@@ -346,29 +354,47 @@ func handleStreamingResponse(w http.ResponseWriter, ch <-chan api.StreamEvent, m
 	created := time.Now().Unix()
 	var finishReason string
 	var outputTokens, inputTokens int
-	var pendingDelta string
 	var allText strings.Builder
 	var inToolCallBlock bool
 	var hasNativeToolCalls bool
-
-	flushPending := func(trim bool) {
-		if pendingDelta == "" {
+	var flushedLen int
+	var upstreamErr string
+	
+	tryFlush := func(force bool) {
+		if inToolCallBlock {
 			return
 		}
-		text := pendingDelta
-		pendingDelta = ""
-		if trim {
-			text = trimFinishedSentinel(text)
-		}
-		if text == "" {
-			return
-		}
-		allText.WriteString(text)
-		if !inToolCallBlock && looksLikeToolCallStart(allText.String()) {
+		current := allText.String()
+		if looksLikeToolCallStart(current) {
 			inToolCallBlock = true
+			return
 		}
-		if !inToolCallBlock {
-			writeSSE(w, streamingChunk(msgID, model, created, map[string]interface{}{"content": text}, nil))
+
+		safeLen := len(current)
+		if !force {
+			lower := strings.ToLower(current)
+			markers := []string{"<tool_calls", "<|dsml|tool_calls", "<invoke", `{"tool_calls"`}
+			withholdLen := 0
+			for _, marker := range markers {
+				for i := len(marker); i > 0; i-- {
+					if i > len(lower) {
+						continue
+					}
+					if strings.HasSuffix(lower, marker[:i]) {
+						if i > withholdLen {
+							withholdLen = i
+						}
+						break
+					}
+				}
+			}
+			safeLen = len(current) - withholdLen
+		}
+
+		if safeLen > flushedLen {
+			delta := current[flushedLen:safeLen]
+			flushedLen = safeLen
+			writeSSE(w, streamingChunk(msgID, model, created, map[string]interface{}{"content": delta}, nil))
 			flusher.Flush()
 		}
 	}
@@ -376,13 +402,13 @@ func handleStreamingResponse(w http.ResponseWriter, ch <-chan api.StreamEvent, m
 	for ev := range ch {
 		switch ev.Type {
 		case api.EventMessageStart:
-			flushPending(false)
+			tryFlush(false)
 			inputTokens = ev.InputTokens
 			writeSSE(w, streamingChunk(msgID, model, created, map[string]interface{}{"role": "assistant"}, nil))
 			flusher.Flush()
 
 		case api.EventContentBlockStart:
-			flushPending(false)
+			tryFlush(false)
 			if ev.ContentBlock.Type == "tool_use" {
 				hasNativeToolCalls = true
 				tc := map[string]interface{}{
@@ -400,7 +426,7 @@ func handleStreamingResponse(w http.ResponseWriter, ch <-chan api.StreamEvent, m
 
 		case api.EventContentBlockDelta:
 			if ev.Delta.Type == "input_json_delta" {
-				flushPending(false)
+				tryFlush(false)
 				tc := map[string]interface{}{
 					"index": 0,
 					"function": map[string]interface{}{
@@ -414,15 +440,14 @@ func handleStreamingResponse(w http.ResponseWriter, ch <-chan api.StreamEvent, m
 			if ev.Delta.Type == "text_delta" && ev.Delta.Text != "" {
 				unescaped := html.UnescapeString(ev.Delta.Text)
 				if strings.TrimSpace(unescaped) == "FINISHED" {
-					flushPending(true)
 					continue
 				}
-				flushPending(false)
-				pendingDelta = unescaped
+				allText.WriteString(unescaped)
+				tryFlush(false)
 			}
 
 		case api.EventMessageDelta:
-			flushPending(true)
+			tryFlush(true)
 			if ev.StopReason != "" {
 				finishReason = ev.StopReason
 			}
@@ -430,14 +455,22 @@ func handleStreamingResponse(w http.ResponseWriter, ch <-chan api.StreamEvent, m
 				outputTokens = ev.Usage.OutputTokens
 			}
 
-		case api.EventError:
-			flushPending(false)
-			fmt.Fprintf(os.Stderr, "[proxy] upstream error: %s\n", ev.ErrorMessage)
+	case api.EventError:
+		tryFlush(false)
+		fmt.Fprintf(os.Stderr, "[proxy] upstream error: %s\n", ev.ErrorMessage)
+		upstreamErr = ev.ErrorMessage
 		}
 	}
 
+	// Strip trailing FINISHED if it got appended
+	finalStr := trimFinishedSentinel(allText.String())
+	if finalStr != allText.String() {
+		allText.Reset()
+		allText.WriteString(finalStr)
+	}
+
 	// Flush final buffered delta.
-	flushPending(true)
+	tryFlush(true)
 
 	extractedCalls := extractToolCallsFromText(allText.String())
 
@@ -468,7 +501,23 @@ func handleStreamingResponse(w http.ResponseWriter, ch <-chan api.StreamEvent, m
 	// Final chunk with finish_reason + usage.
 	writeSSE(w, streamingChunkWithUsage(msgID, model, created, finishReason, inputTokens, outputTokens))
 	flusher.Flush()
-
+	// If upstream errored with no content produced, send an SSE error event.
+	if upstreamErr != "" && allText.Len() == 0 && !hasNativeToolCalls {
+		errCode := http.StatusServiceUnavailable // 503
+		errType := "upstream_error"
+		if deepseekprovider.IsRateLimitError(upstreamErr) {
+			errCode = http.StatusTooManyRequests // 429
+			errType = "rate_limit_error"
+		}
+		writeSSE(w, map[string]interface{}{
+			"error": map[string]interface{}{
+				"message": fmt.Sprintf("DeepSeek upstream error: %s", upstreamErr),
+				"type":    errType,
+				"code":    errCode,
+			},
+		})
+		flusher.Flush()
+	}
 	// [DONE] marker.
 	writeSSE(w, nil)
 	flusher.Flush()
@@ -536,6 +585,7 @@ func handleNonStreamingResponse(w http.ResponseWriter, ch <-chan api.StreamEvent
 	var finishReason string
 	var outputTokens, inputTokens int
 	var lastToolCallIdx int
+	var upstreamErr string
 
 	for ev := range ch {
 		switch ev.Type {
@@ -574,17 +624,33 @@ func handleNonStreamingResponse(w http.ResponseWriter, ch <-chan api.StreamEvent
 
 		case api.EventError:
 			fmt.Fprintf(os.Stderr, "[proxy] upstream error: %s\n", ev.ErrorMessage)
+			upstreamErr = ev.ErrorMessage
 		}
 	}
 
-	// Trim FINISHED sentinel from the end of the full text.
-	text := fullText.String()
-	text = trimFinishedSentinel(text)
+	// If we got an upstream error with no usable output, return an appropriate HTTP error.
+	if upstreamErr != "" && fullText.Len() == 0 && len(toolCalls) == 0 {
+		errCode := http.StatusServiceUnavailable // 503
+		errType := "upstream_error"
+		if deepseekprovider.IsRateLimitError(upstreamErr) {
+			errCode = http.StatusTooManyRequests // 429
+			errType = "rate_limit_error"
+		}
+		writeOpenAIError(w, "/v1/chat/completions", errType,
+			fmt.Sprintf("DeepSeek upstream error: %s", upstreamErr), "", errCode)
+		return
+	}
 
+	// Trim FINISHED sentinel from the end of the full text.
+	text := trimFinishedSentinel(fullText.String())
+
+	// Try to extract XML/JSON tool calls embedded in the text stream.
 	textToolCalls := extractToolCallsFromText(fullText.String())
 
+	// If we got text-embedded tool calls, strip the XML from displayed text.
 	if len(textToolCalls) > 0 {
 		finishReason = "tool_calls"
+		text = "" // suppress the raw XML from content
 	} else if finishReason == "" || finishReason == "end_turn" {
 		finishReason = "stop"
 	} else if finishReason == "tool_use" {
@@ -597,9 +663,8 @@ func handleNonStreamingResponse(w http.ResponseWriter, ch <-chan api.StreamEvent
 	if text != "" && len(textToolCalls) == 0 {
 		message["content"] = text
 	} else {
-		message["content"] = nil
+		message["content"] = ""
 	}
-
 	if len(textToolCalls) > 0 {
 		var openAIToolCalls []map[string]interface{}
 		for _, tc := range textToolCalls {
@@ -780,8 +845,16 @@ func convertMessages(openai []chatMessage) (string, []api.Message) {
 }
 
 func toPropertyMap(raw map[string]interface{}) map[string]api.Property {
-	out := make(map[string]api.Property, len(raw))
-	for k, v := range raw {
+	propsVal, ok := raw["properties"]
+	if !ok {
+		return nil
+	}
+	propsMap, ok := propsVal.(map[string]interface{})
+	if !ok {
+		return nil
+	}
+	out := make(map[string]api.Property, len(propsMap))
+	for k, v := range propsMap {
 		m, ok := v.(map[string]interface{})
 		if !ok {
 			continue
@@ -840,8 +913,8 @@ func looksLikeToolCallStart(text string) bool {
 	return strings.Contains(lower, "<tool_calls") ||
 		strings.Contains(lower, "<|dsml|tool_calls") ||
 		strings.Contains(lower, "<invoke name=") ||
-		strings.Contains(lower, `{"tool_calls"`) ||
-		strings.Contains(lower, `{"tool_calls`)
+		strings.Contains(lower, "<invoke") ||
+		strings.Contains(lower, `{"tool_calls"`)
 }
 
 // extractToolCallsFromText parses XML or JSON tool calls from accumulated text.
