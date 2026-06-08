@@ -370,6 +370,9 @@ func (s *Server) handleChatWS(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "chat mode: failed to create provider", http.StatusInternalServerError)
 		return
 	}
+	if loop.CtxAssembler != nil {
+		loop.CtxAssembler.SetSessionStore(s.chatSessions)
+	}
 	sessionID := newSessionID()
 	s.chatSessions.CreateSession(sessionID, "", "")
 	ctx := r.Context()

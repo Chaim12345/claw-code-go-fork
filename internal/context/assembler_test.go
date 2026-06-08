@@ -1,8 +1,11 @@
 package context
 
 import (
+	"strings"
 	"testing"
 	"time"
+
+	"claw-code-go/internal/session"
 )
 
 func TestAssembler_Assemble_NotEmpty(t *testing.T) {
@@ -114,4 +117,115 @@ func truncateString(s string, maxLen int) string {
 		return s
 	}
 	return s[:maxLen] + "..."
+}
+
+type mockStore struct {
+	sessions  []*session.Session
+	summaries map[string]string
+}
+
+func (m *mockStore) GetRecentSessions(limit int) ([]*session.Session, error) {
+	if limit > len(m.sessions) {
+		limit = len(m.sessions)
+	}
+	return m.sessions[:limit], nil
+}
+func (m *mockStore) GetSessionSummary(id string) (string, error) {
+	return m.summaries[id], nil
+}
+func (m *mockStore) CreateSession(_, _, _ string) error               { return nil }
+func (m *mockStore) GetSession(_ string) (*session.Session, error)    { return nil, nil }
+func (m *mockStore) ListSessions() ([]*session.Session, error)        { return m.sessions, nil }
+func (m *mockStore) SearchSessions(_ string) ([]*session.Session, error) { return nil, nil }
+func (m *mockStore) FilterSessions(_, _ string, _, _ time.Time) ([]*session.Session, error) {
+	return nil, nil
+}
+func (m *mockStore) DeleteSession(_ string) error                          { return nil }
+func (m *mockStore) UpdateSessionPreview(_, _, _ string, _ int) error      { return nil }
+func (m *mockStore) RecordMessage(_, _, _ string, _ int) (int64, error)    { return 0, nil }
+func (m *mockStore) GetMessages(_ string) ([]*session.Message, error)      { return nil, nil }
+func (m *mockStore) RecordToolCall(_ int64, _, _, _ string, _ int) error   { return nil }
+func (m *mockStore) GetToolCalls(_ int64) ([]*session.ToolCall, error)     { return nil, nil }
+func (m *mockStore) ExportSessionMarkdown(_ string) (string, error)        { return "", nil }
+func (m *mockStore) ExportSessionJSON(_ string) ([]byte, error)            { return nil, nil }
+func (m *mockStore) ImportSessionJSON(_ []byte) (string, error)           { return "", nil }
+func (m *mockStore) ImportSessionMarkdown(_ []byte) (string, error)        { return "", nil }
+func (m *mockStore) Close() error                                          { return nil }
+
+func TestAssembler_SessionHistory_NilStore(t *testing.T) {
+	a := NewAssembler(".")
+	result := a.buildSessionHistorySection(2000)
+	if result != "" {
+		t.Errorf("expected empty string with nil store, got: %q", result)
+	}
+}
+
+func TestAssembler_SessionHistory_WithSessions(t *testing.T) {
+	store := &mockStore{
+		sessions: []*session.Session{
+			{ID: "abc123", Provider: "deepseek", Model: "expert", LastActiveAt: time.Now()},
+			{ID: "def456", Provider: "anthropic", Model: "sonnet-4", LastActiveAt: time.Now()},
+		},
+		summaries: map[string]string{
+			"abc123": "Fixed UUID bug in WebSocket handler",
+			"def456": "Added context injection to assembler",
+		},
+	}
+	a := NewAssembler(".")
+	a.SetSessionStore(store)
+
+	result := a.buildSessionHistorySection(2000)
+	if !strings.Contains(result, "Recent Sessions") {
+		t.Error("missing 'Recent Sessions' heading")
+	}
+	if !strings.Contains(result, "abc123") {
+		t.Error("missing session ID abc123")
+	}
+	if !strings.Contains(result, "Fixed UUID bug") {
+		t.Error("missing summary for abc123")
+	}
+	if !strings.Contains(result, "deepseek/expert") {
+		t.Error("missing provider/model for abc123")
+	}
+}
+
+func TestAssembler_SessionHistory_AssembleIntegration(t *testing.T) {
+	store := &mockStore{
+		sessions: []*session.Session{
+			{ID: "s1", Provider: "deepseek", Model: "expert", LastActiveAt: time.Now()},
+		},
+		summaries: map[string]string{
+			"s1": "Implemented session history context",
+		},
+	}
+	a := NewAssembler(".")
+	a.SetSessionStore(store)
+
+	result := a.Assemble()
+	if !strings.Contains(result, "Recent Sessions") {
+		t.Error("Assemble() output missing Recent Sessions section")
+	}
+	if !strings.Contains(result, "Implemented session history context") {
+		t.Error("Assemble() output missing session summary text")
+	}
+}
+
+func TestAssembler_SessionHistory_BudgetCapped(t *testing.T) {
+	longSummary := strings.Repeat("x", 50000)
+	store := &mockStore{
+		sessions: []*session.Session{
+			{ID: "big", Provider: "deepseek", Model: "expert", LastActiveAt: time.Now()},
+		},
+		summaries: map[string]string{
+			"big": longSummary,
+		},
+	}
+	a := NewAssembler(".")
+	a.SetSessionStore(store)
+
+	result := a.buildSessionHistorySection(2000)
+	estimatedTokens := len(result) / 4
+	if estimatedTokens > 2200 {
+		t.Errorf("session history section exceeded budget: ~%d tokens (limit 2000)", estimatedTokens)
+	}
 }
