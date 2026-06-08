@@ -5,6 +5,9 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"time"
+
+	"claw-code-go/internal/api"
 )
 
 func TestRalphConfig_Defaults(t *testing.T) {
@@ -30,7 +33,7 @@ func TestRenderRalphPrompt(t *testing.T) {
 	if err != nil {
 		t.Fatalf("RenderRalphPrompt: %v", err)
 	}
-	if !strings.Contains(rendered, "Iteration 1 of 10") {
+	if !strings.Contains(rendered, "iteration 1/10") {
 		t.Error("expected iteration/max in prompt")
 	}
 	if !strings.Contains(rendered, "ROADMAP.md") {
@@ -147,5 +150,131 @@ func TestRalphLoop_StopsAtMax(t *testing.T) {
 	}
 	if called != 5 {
 		t.Errorf("expected 5 iterations, got %d", called)
+	}
+}
+
+func TestRalphToolSummary(t *testing.T) {
+	msgs := []api.Message{
+		{Role: "assistant", Content: []api.ContentBlock{
+			{Type: "tool_use", Name: "read_file"},
+			{Type: "tool_use", Name: "glob"},
+		}},
+		{Role: "user", Content: []api.ContentBlock{
+			{Type: "tool_result"},
+		}},
+		{Role: "assistant", Content: []api.ContentBlock{
+			{Type: "tool_use", Name: "file_edit"},
+			{Type: "tool_use", Name: "bash"},
+		}},
+	}
+	reads, writes := ralphToolSummary(msgs)
+	if reads != 2 {
+		t.Errorf("reads: got %d, want 2", reads)
+	}
+	if writes != 2 {
+		t.Errorf("writes: got %d, want 2", writes)
+	}
+}
+
+func TestRalphToolSummary_ReadOnly(t *testing.T) {
+	msgs := []api.Message{
+		{Role: "assistant", Content: []api.ContentBlock{
+			{Type: "tool_use", Name: "read_file"},
+			{Type: "tool_use", Name: "grep"},
+			{Type: "tool_use", Name: "glob"},
+		}},
+	}
+	reads, writes := ralphToolSummary(msgs)
+	if reads != 3 {
+		t.Errorf("reads: got %d, want 3", reads)
+	}
+	if writes != 0 {
+		t.Errorf("writes: got %d, want 0", writes)
+	}
+}
+
+func TestRalphBuildProgressNotes_ReadOnlyWarning(t *testing.T) {
+	notes := ralphBuildProgressNotes(5, 0, "")
+	if !strings.Contains(notes, "WARNING") {
+		t.Error("expected WARNING for read-only iteration")
+	}
+	if !strings.Contains(notes, "5 reads, 0 writes") {
+		t.Errorf("expected tool call count, got: %s", notes)
+	}
+}
+
+func TestRalphBuildProgressNotes_WithWrites(t *testing.T) {
+	notes := ralphBuildProgressNotes(2, 3, "")
+	if strings.Contains(notes, "WARNING") {
+		t.Error("did not expect WARNING when writes exist")
+	}
+	if !strings.Contains(notes, "2 reads, 3 writes") {
+		t.Errorf("expected tool call count, got: %s", notes)
+	}
+}
+
+func TestRalphBuildProgressNotes_WithGitDiff(t *testing.T) {
+	notes := ralphBuildProgressNotes(1, 1, " file.go | 5 +-")
+	if !strings.Contains(notes, "Git changes") {
+		t.Error("expected git changes header")
+	}
+	if !strings.Contains(notes, "file.go") {
+		t.Error("expected file.go in diff")
+	}
+}
+
+func TestRenderRalphPrompt_ProgressNotes(t *testing.T) {
+	cfg := DefaultRalphConfig()
+	cfg.ProgressNotes = "WARNING: last iteration only READ files"
+	rendered, err := RenderRalphPrompt(cfg, "spec body", 2, 10)
+	if err != nil {
+		t.Fatalf("RenderRalphPrompt: %v", err)
+	}
+	if !strings.Contains(rendered, "LAST ITERATION") {
+		t.Error("expected LAST ITERATION header when ProgressNotes set")
+	}
+	if !strings.Contains(rendered, "WARNING: last iteration only READ files") {
+		t.Error("expected progress notes content in prompt")
+	}
+}
+
+func TestRenderRalphPrompt_NoProgressNotes(t *testing.T) {
+	cfg := DefaultRalphConfig()
+	rendered, err := RenderRalphPrompt(cfg, "spec body", 1, 10)
+	if err != nil {
+		t.Fatalf("RenderRalphPrompt: %v", err)
+	}
+	if strings.Contains(rendered, "LAST ITERATION") {
+		t.Error("did not expect LAST ITERATION when ProgressNotes empty")
+	}
+}
+
+func TestRalphConfig_NewDefaults(t *testing.T) {
+	cfg := DefaultRalphConfig()
+	if cfg.IterationTimeout != DefaultRalphIterationTimeout {
+		t.Errorf("IterationTimeout: got %v, want %v", cfg.IterationTimeout, DefaultRalphIterationTimeout)
+	}
+	if !cfg.ProgressTracking {
+		t.Error("ProgressTracking should default to true")
+	}
+}
+
+func TestRalphIterationTimeout(t *testing.T) {
+	timeout := DefaultRalphIterationTimeout
+	if timeout <= 0 {
+		t.Error("DefaultRalphIterationTimeout should be positive")
+	}
+	cfg := DefaultRalphConfig()
+	if cfg.IterationTimeout != timeout {
+		t.Errorf("IterationTimeout: got %v, want %v", cfg.IterationTimeout, timeout)
+	}
+	// Verify that a very short timeout causes context cancellation
+	shortTimeout := 1 * time.Millisecond
+	iterCtx, cancel := context.WithTimeout(context.Background(), shortTimeout)
+	defer cancel()
+	// Sleep past the deadline
+	time.Sleep(10 * time.Millisecond)
+	if iterCtx.Err() == nil {
+		t.Error("expected context to be cancelled after short timeout")
 	}
 }

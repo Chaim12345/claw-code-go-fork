@@ -1,15 +1,24 @@
 package web
 
 import (
+	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
+	"time"
+
+	"claw-code-go/internal/session"
 )
 
 func TestServer_IndexServesHTML(t *testing.T) {
-	s := NewServer(Config{Addr: "127.0.0.1:0"})
+	s, err := NewServer(Config{Addr: "127.0.0.1:0"})
+	if err != nil {
+		t.Fatal(err)
+	}
 	ts := httptest.NewServer(s.routes())
 	defer ts.Close()
 
@@ -30,7 +39,10 @@ func TestServer_IndexServesHTML(t *testing.T) {
 }
 
 func TestServer_IndexCacheControl(t *testing.T) {
-	s := NewServer(Config{Addr: "127.0.0.1:0"})
+	s, err := NewServer(Config{Addr: "127.0.0.1:0"})
+	if err != nil {
+		t.Fatal(err)
+	}
 	ts := httptest.NewServer(s.routes())
 	defer ts.Close()
 
@@ -47,7 +59,10 @@ func TestServer_IndexCacheControl(t *testing.T) {
 }
 
 func TestServer_Healthz(t *testing.T) {
-	s := NewServer(Config{Addr: "127.0.0.1:0"})
+	s, err := NewServer(Config{Addr: "127.0.0.1:0"})
+	if err != nil {
+		t.Fatal(err)
+	}
 	ts := httptest.NewServer(s.routes())
 	defer ts.Close()
 
@@ -82,7 +97,10 @@ func TestServer_Healthz(t *testing.T) {
 }
 
 func TestServer_ReadyzNoFactory(t *testing.T) {
-	s := NewServer(Config{Addr: "127.0.0.1:0"})
+	s, err := NewServer(Config{Addr: "127.0.0.1:0"})
+	if err != nil {
+		t.Fatal(err)
+	}
 	ts := httptest.NewServer(s.routes())
 	defer ts.Close()
 
@@ -104,7 +122,10 @@ func TestServer_ReadyzNoFactory(t *testing.T) {
 }
 
 func TestServer_StaticAssetsServed(t *testing.T) {
-	s := NewServer(Config{Addr: "127.0.0.1:0"})
+	s, err := NewServer(Config{Addr: "127.0.0.1:0"})
+	if err != nil {
+		t.Fatal(err)
+	}
 	ts := httptest.NewServer(s.routes())
 	defer ts.Close()
 
@@ -129,7 +150,10 @@ func TestServer_StaticAssetsServed(t *testing.T) {
 }
 
 func TestServer_StaticCacheHeaders(t *testing.T) {
-	s := NewServer(Config{Addr: "127.0.0.1:0"})
+	s, err := NewServer(Config{Addr: "127.0.0.1:0"})
+	if err != nil {
+		t.Fatal(err)
+	}
 	ts := httptest.NewServer(s.routes())
 	defer ts.Close()
 
@@ -186,7 +210,10 @@ func TestParseControlMessage(t *testing.T) {
 }
 
 func TestServer_ErrorPage(t *testing.T) {
-	s := NewServer(Config{Addr: "127.0.0.1:0"})
+	s, err := NewServer(Config{Addr: "127.0.0.1:0"})
+	if err != nil {
+		t.Fatal(err)
+	}
 	ts := httptest.NewServer(s.routes())
 	defer ts.Close()
 
@@ -256,7 +283,10 @@ func TestServer_ErrorPage(t *testing.T) {
 }
 
 func TestRedirectToError(t *testing.T) {
-	s := NewServer(Config{Addr: "127.0.0.1:0"})
+	s, err := NewServer(Config{Addr: "127.0.0.1:0"})
+	if err != nil {
+		t.Fatal(err)
+	}
 	ts := httptest.NewServer(s.routes())
 	defer ts.Close()
 
@@ -294,5 +324,399 @@ func TestRedirectToError(t *testing.T) {
 		if !strings.Contains(bodyStr, want) {
 			t.Errorf("body missing %q", want)
 		}
+	}
+}
+
+func openTestSessionStore(t *testing.T) *session.Store {
+	t.Helper()
+	dir, err := os.MkdirTemp("", "claw-session-search-test-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.RemoveAll(dir) })
+	store, err := session.Open(filepath.Join(dir, "test.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { store.Close() })
+	return store
+}
+
+func TestServer_SessionsSearchFTS(t *testing.T) {
+	store := openTestSessionStore(t)
+
+	if err := store.CreateSession("search-s1", "deepseek", "expert"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.RecordMessage("search-s1", "user", "How do I write concurrent Go code?", 10); err != nil {
+		t.Fatal(err)
+	}
+
+	s, err := NewServer(Config{
+		Addr:                 "127.0.0.1:0",
+		SessionStoreOverride: store,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ts := httptest.NewServer(s.routes())
+	defer ts.Close()
+
+	resp, err := http.Get(ts.URL + "/api/sessions/search?q=concurrent")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != 200 {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status = %d, body = %s", resp.StatusCode, body)
+	}
+
+	var results []*session.Session
+	if err := json.NewDecoder(resp.Body).Decode(&results); err != nil {
+		t.Fatal(err)
+	}
+	if len(results) != 1 {
+		t.Fatalf("expected 1 result, got %d", len(results))
+	}
+	if results[0].ID != "search-s1" {
+		t.Errorf("ID = %q, want search-s1", results[0].ID)
+	}
+}
+
+func TestServer_SessionsSearchFilter(t *testing.T) {
+	store := openTestSessionStore(t)
+
+	if err := store.CreateSession("filter-s1", "deepseek", "expert"); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.CreateSession("filter-s2", "openai", "gpt-4"); err != nil {
+		t.Fatal(err)
+	}
+
+	s, err := NewServer(Config{
+		Addr:                 "127.0.0.1:0",
+		SessionStoreOverride: store,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ts := httptest.NewServer(s.routes())
+	defer ts.Close()
+
+	resp, err := http.Get(ts.URL + "/api/sessions/search?provider=deepseek")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != 200 {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status = %d, body = %s", resp.StatusCode, body)
+	}
+
+	var results []*session.Session
+	if err := json.NewDecoder(resp.Body).Decode(&results); err != nil {
+		t.Fatal(err)
+	}
+	if len(results) != 1 {
+		t.Fatalf("expected 1 result, got %d", len(results))
+	}
+	if results[0].Provider != "deepseek" {
+		t.Errorf("Provider = %q, want deepseek", results[0].Provider)
+	}
+}
+
+func TestServer_SessionsSearchMethodReject(t *testing.T) {
+	s, err := NewServer(Config{Addr: "127.0.0.1:0"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ts := httptest.NewServer(s.routes())
+	defer ts.Close()
+
+	resp, err := http.Post(ts.URL+"/api/sessions/search", "", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusMethodNotAllowed {
+		t.Errorf("status = %d, want %d", resp.StatusCode, http.StatusMethodNotAllowed)
+	}
+}
+
+func TestServer_SessionsSearchNoFilters(t *testing.T) {
+	store := openTestSessionStore(t)
+
+	if err := store.CreateSession("nofilter-s1", "deepseek", "expert"); err != nil {
+		t.Fatal(err)
+	}
+
+	s, err := NewServer(Config{
+		Addr:                 "127.0.0.1:0",
+		SessionStoreOverride: store,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ts := httptest.NewServer(s.routes())
+	defer ts.Close()
+
+	resp, err := http.Get(ts.URL + "/api/sessions/search")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != 200 {
+		t.Fatalf("status = %d", resp.StatusCode)
+	}
+
+	var results []*session.Session
+	if err := json.NewDecoder(resp.Body).Decode(&results); err != nil {
+		t.Fatal(err)
+	}
+	if len(results) != 1 {
+		t.Fatalf("expected 1 result (no filters = all), got %d", len(results))
+	}
+}
+
+func TestServer_SessionsSearchTimeFilter(t *testing.T) {
+	store := openTestSessionStore(t)
+
+	if err := store.CreateSession("time-s1", "deepseek", "expert"); err != nil {
+		t.Fatal(err)
+	}
+
+	sess, _ := store.GetSession("time-s1")
+	after := sess.LastActiveAt.Add(-1 * time.Second).Format(time.RFC3339)
+
+	s, err := NewServer(Config{
+		Addr:                 "127.0.0.1:0",
+		SessionStoreOverride: store,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ts := httptest.NewServer(s.routes())
+	defer ts.Close()
+
+	resp, err := http.Get(ts.URL + "/api/sessions/search?after=" + after)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != 200 {
+		t.Fatalf("status = %d", resp.StatusCode)
+	}
+
+	var results []*session.Session
+	if err := json.NewDecoder(resp.Body).Decode(&results); err != nil {
+		t.Fatal(err)
+	}
+	if len(results) != 1 {
+		t.Fatalf("expected 1 result, got %d", len(results))
+	}
+}
+
+func TestServer_SessionExportJSON(t *testing.T) {
+	store := openTestSessionStore(t)
+	if err := store.CreateSession("export-s1", "deepseek", "expert"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.RecordMessage("export-s1", "user", "test export", 5); err != nil {
+		t.Fatal(err)
+	}
+
+	s, err := NewServer(Config{
+		Addr:                  "127.0.0.1:0",
+		SessionStoreOverride: store,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ts := httptest.NewServer(s.routes())
+	defer ts.Close()
+
+	resp, err := http.Get(ts.URL + "/api/sessions/export/export-s1?format=json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != 200 {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status = %d, body = %s", resp.StatusCode, body)
+	}
+	ct := resp.Header.Get("Content-Type")
+	if !strings.Contains(ct, "application/json") {
+		t.Errorf("Content-Type = %q, want application/json", ct)
+	}
+	disposition := resp.Header.Get("Content-Disposition")
+	if !strings.Contains(disposition, "export-s1.json") {
+		t.Errorf("Content-Disposition = %q, want export-s1.json", disposition)
+	}
+
+	var exported session.ExportedSession
+	if err := json.NewDecoder(resp.Body).Decode(&exported); err != nil {
+		t.Fatal(err)
+	}
+	if exported.Session.ID != "export-s1" {
+		t.Errorf("ID = %q, want export-s1", exported.Session.ID)
+	}
+}
+
+func TestServer_SessionExportMarkdown(t *testing.T) {
+	store := openTestSessionStore(t)
+	if err := store.CreateSession("export-md", "deepseek", "expert"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.RecordMessage("export-md", "user", "hello md", 5); err != nil {
+		t.Fatal(err)
+	}
+
+	s, err := NewServer(Config{
+		Addr:                  "127.0.0.1:0",
+		SessionStoreOverride: store,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ts := httptest.NewServer(s.routes())
+	defer ts.Close()
+
+	resp, err := http.Get(ts.URL + "/api/sessions/export/export-md?format=markdown")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != 200 {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status = %d, body = %s", resp.StatusCode, body)
+	}
+	ct := resp.Header.Get("Content-Type")
+	if !strings.Contains(ct, "text/markdown") {
+		t.Errorf("Content-Type = %q, want text/markdown", ct)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	if !strings.Contains(string(body), "## Session:") {
+		t.Error("markdown missing session heading")
+	}
+	if !strings.Contains(string(body), "hello md") {
+		t.Error("markdown missing user content")
+	}
+}
+
+func TestServer_SessionExportNotFound(t *testing.T) {
+	store := openTestSessionStore(t)
+	s, err := NewServer(Config{
+		Addr:                  "127.0.0.1:0",
+		SessionStoreOverride: store,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ts := httptest.NewServer(s.routes())
+	defer ts.Close()
+
+	resp, err := http.Get(ts.URL + "/api/sessions/export/nonexistent")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != 500 {
+		t.Errorf("status = %d, want 500", resp.StatusCode)
+	}
+}
+
+func TestServer_SessionImportJSON(t *testing.T) {
+	store := openTestSessionStore(t)
+	if err := store.CreateSession("import-src", "deepseek", "expert"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.RecordMessage("import-src", "user", "import me", 5); err != nil {
+		t.Fatal(err)
+	}
+
+	data, err := store.ExportSessionJSON("import-src")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	s, err := NewServer(Config{
+		Addr:                  "127.0.0.1:0",
+		SessionStoreOverride: store,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ts := httptest.NewServer(s.routes())
+	defer ts.Close()
+
+	resp, err := http.Post(ts.URL+"/api/sessions/import?format=json", "application/json", strings.NewReader(string(data)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != 200 {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status = %d, body = %s", resp.StatusCode, body)
+	}
+
+	var result map[string]string
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		t.Fatal(err)
+	}
+	if result["id"] == "" {
+		t.Error("expected non-empty id in response")
+	}
+}
+
+func TestServer_SessionImportMarkdown(t *testing.T) {
+	store := openTestSessionStore(t)
+	if err := store.CreateSession("import-md-src", "deepseek", "expert"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.RecordMessage("import-md-src", "user", "md import test", 5); err != nil {
+		t.Fatal(err)
+	}
+
+	md, err := store.ExportSessionMarkdown("import-md-src")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	s, err := NewServer(Config{
+		Addr:                  "127.0.0.1:0",
+		SessionStoreOverride: store,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ts := httptest.NewServer(s.routes())
+	defer ts.Close()
+
+	resp, err := http.Post(ts.URL+"/api/sessions/import?format=markdown", "text/markdown", strings.NewReader(md))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != 200 {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status = %d, body = %s", resp.StatusCode, body)
+	}
+
+	var result map[string]string
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		t.Fatal(err)
+	}
+	if result["id"] == "" {
+		t.Error("expected non-empty id in response")
 	}
 }

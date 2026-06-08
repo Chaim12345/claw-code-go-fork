@@ -57,7 +57,8 @@ type readyResponse struct {
 // Returns status, version, uptime, active sessions, and last provider
 // error timestamp (if any).
 func (s *Server) handleHealthz(w http.ResponseWriter, r *http.Request) {
-	activeChat := s.chatSessions.count()
+	sessions, _ := s.chatSessions.ListSessions()
+	activeChat := len(sessions)
 
 	s.mu.Lock()
 	ptyCount := len(s.sessions)

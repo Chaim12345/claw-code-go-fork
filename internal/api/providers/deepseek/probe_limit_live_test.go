@@ -67,6 +67,9 @@ func TestLiveProbeActualInputLimit(t *testing.T) {
 			if err != nil {
 				t.Fatalf("fetchSettings: %v", err)
 			}
+			if len(settings) == 0 {
+				t.Skip("settings endpoint returned no model configs (API may have changed)")
+			}
 			cfg, ok := settings[tc.model]
 			if !ok {
 				// Map "instant" -> "default" and "expert" -> "expert"

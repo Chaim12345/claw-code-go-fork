@@ -291,6 +291,8 @@ func runRalphSubcommand(args []string) {
 	maxIter := fs.Int("max-iterations", runtime.DefaultRalphMaxIterations, "Maximum fresh-context iterations")
 	selfDebug := fs.Bool("self-debug", true, "After exhausting retries, run one self-debug pass where the agent sees the last error and is tasked with fixing the root cause")
 	delta := fs.Bool("delta", false, "Enable delta mode (DeepSeek only): pass cfg.DeltaMode=true to the provider. Currently a no-op for the deepseek web provider, but exposed for forward compatibility.")
+	iterTimeout := fs.Duration("iteration-timeout", runtime.DefaultRalphIterationTimeout, "Per-iteration timeout (e.g. 5m, 10m). 0 disables timeout.")
+	progressTracking := fs.Bool("progress-tracking", true, "After each iteration, capture git diff stats and tool-call counts; inject into next iteration's prompt to prevent read-only loops.")
 	_ = fs.Parse(args)
 
 	cfg := runtime.LoadConfig()
@@ -315,8 +317,10 @@ func runRalphSubcommand(args []string) {
 	ralphCfg.SpecPath = *spec
 	ralphCfg.MaxIterations = *maxIter
 	ralphCfg.SelfDebug = *selfDebug
+	ralphCfg.IterationTimeout = *iterTimeout
+	ralphCfg.ProgressTracking = *progressTracking
 
-	fmt.Fprintf(os.Stderr, "[ralph] starting against %s (max %d iterations, self-debug=%v, delta=%v)\n", ralphCfg.SpecPath, ralphCfg.MaxIterations, ralphCfg.SelfDebug, cfg.DeltaMode)
+	fmt.Fprintf(os.Stderr, "[ralph] starting against %s (max %d iterations, self-debug=%v, delta=%v, timeout=%v, progress=%v)\n", ralphCfg.SpecPath, ralphCfg.MaxIterations, ralphCfg.SelfDebug, cfg.DeltaMode, ralphCfg.IterationTimeout, ralphCfg.ProgressTracking)
 	if err := runtime.RunRalphLoop(ctx, loop, ralphCfg); err != nil {
 		fmt.Fprintf(os.Stderr, "[ralph] stopped: %v\n", err)
 		os.Exit(1)
@@ -385,9 +389,17 @@ func runWebSubcommand(args []string) {
 		if *maxTurns > 0 {
 			cfg.MaxTurns = *maxTurns
 		}
-		p, err := buildProvider(cfg)
-		if err == nil {
+		// Validate that the provider can be built at startup, but create
+		// a fresh provider per WebSocket connection to avoid race conditions
+		// on shared state (chatSessionID, parentMessageID) when multiple
+		// browser tabs or reconnects are active simultaneously.
+		if _, err := buildProvider(cfg); err == nil {
 			chatLoopFactory = func() *runtime.ConversationLoop {
+				p, err := buildProvider(cfg)
+				if err != nil {
+					fmt.Fprintf(os.Stderr, "[web] chat loop: failed to build provider: %v\n", err)
+					return nil
+				}
 				return runtime.NewConversationLoop(cfg, p)
 			}
 			fmt.Fprintf(os.Stderr, "[web] chat mode enabled with provider %s (delta=%v, max-turns=%d)\n", *provider, cfg.DeltaMode, cfg.MaxTurns)
@@ -396,12 +408,16 @@ func runWebSubcommand(args []string) {
 		}
 	}
 
-	srv := web.NewServer(web.Config{
+	srv, err := web.NewServer(web.Config{
 		Addr:       *addr,
 		BinaryPath: exe,
 		Workdir:    *cwd,
 		Args:       tuiArgs,
 	})
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "[web] error: %v\n", err)
+		os.Exit(1)
+	}
 	srv.ChatLoopFactory = chatLoopFactory
 	if err := srv.ListenAndServe(ctx); err != nil {
 		fmt.Fprintf(os.Stderr, "[web] error: %v\n", err)

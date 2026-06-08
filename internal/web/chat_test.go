@@ -142,7 +142,10 @@ func TestChatSessionRoundTrip(t *testing.T) {
 	loop := runtime.NewConversationLoop(cfg, fc)
 
 	// Create the server with a ChatLoopFactory.
-	srv := NewServer(Config{Addr: "127.0.0.1:0"})
+	srv, err := NewServer(Config{Addr: "127.0.0.1:0"})
+	if err != nil {
+		t.Fatal(err)
+	}
 	srv.ChatLoopFactory = func() *runtime.ConversationLoop {
 		return loop
 	}
@@ -242,7 +245,10 @@ func TestChatSession_ParseError(t *testing.T) {
 	}
 	loop := runtime.NewConversationLoop(cfg, &fakeClient{events: nil})
 
-	srv := NewServer(Config{Addr: "127.0.0.1:0"})
+	srv, err := NewServer(Config{Addr: "127.0.0.1:0"})
+	if err != nil {
+		t.Fatal(err)
+	}
 	srv.ChatLoopFactory = func() *runtime.ConversationLoop {
 		return loop
 	}
@@ -293,7 +299,10 @@ func TestChatSession_EmptyUserInput(t *testing.T) {
 	}
 	loop := runtime.NewConversationLoop(cfg, &fakeClient{events: nil})
 
-	srv := NewServer(Config{Addr: "127.0.0.1:0"})
+	srv, err := NewServer(Config{Addr: "127.0.0.1:0"})
+	if err != nil {
+		t.Fatal(err)
+	}
 	srv.ChatLoopFactory = func() *runtime.ConversationLoop {
 		return loop
 	}
@@ -346,7 +355,10 @@ func TestChatSession_PermissionReplyDecode(t *testing.T) {
 	}
 	loop := runtime.NewConversationLoop(cfg, &fakeClient{events: nil})
 
-	srv := NewServer(Config{Addr: "127.0.0.1:0"})
+	srv, err := NewServer(Config{Addr: "127.0.0.1:0"})
+	if err != nil {
+		t.Fatal(err)
+	}
 	srv.ChatLoopFactory = func() *runtime.ConversationLoop {
 		return loop
 	}
@@ -392,7 +404,10 @@ func TestChatSessionHandleChatWS_NoFactory(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test in short mode")
 	}
-	srv := NewServer(Config{Addr: "127.0.0.1:0"})
+	srv, err := NewServer(Config{Addr: "127.0.0.1:0"})
+	if err != nil {
+		t.Fatal(err)
+	}
 	ts := httptest.NewServer(srv.routes())
 	defer ts.Close()
 
@@ -420,7 +435,10 @@ func TestChatSession_UnknownMessageType(t *testing.T) {
 	}
 	loop := runtime.NewConversationLoop(cfg, &fakeClient{events: nil})
 
-	srv := NewServer(Config{Addr: "127.0.0.1:0"})
+	srv, err := NewServer(Config{Addr: "127.0.0.1:0"})
+	if err != nil {
+		t.Fatal(err)
+	}
 	srv.ChatLoopFactory = func() *runtime.ConversationLoop {
 		return loop
 	}
@@ -502,7 +520,10 @@ func TestChatSession_ConcurrentWrites(t *testing.T) {
 		},
 	})
 
-	srv := NewServer(Config{Addr: "127.0.0.1:0"})
+	srv, err := NewServer(Config{Addr: "127.0.0.1:0"})
+	if err != nil {
+		t.Fatal(err)
+	}
 	srv.ChatLoopFactory = func() *runtime.ConversationLoop {
 		return loop
 	}

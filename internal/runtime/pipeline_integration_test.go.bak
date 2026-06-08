@@ -1,0 +1,821 @@
+package runtime
+
+import (
+	"encoding/json"
+	"errors"
+	"fmt"
+	"os"
+	"strings"
+	"testing"
+
+	"claw-code-go/internal/api"
+	"claw-code-go/internal/permissions"
+)
+
+// --- Mock APIClient for integration tests ---
+// The mock is minimal — we only need StreamResponse to satisfy the
+// ConversationLoop constructor. The actual pipeline tests call
+// ExecuteTool / ExecuteToolQuiet / validateToolInput directly,
+// bypassing the streaming path entirely.
+
+type mockAPIClient struct{}
+
+func (mockAPIClient) StreamResponse(_ context.Context, _ api.CreateMessageRequest) (<-chan api.StreamEvent, error) {
+	ch := make(chan api.StreamEvent)
+	close(ch)
+	return ch, nil
+}
+
+func (mockAPIClient) MaxInputTokens() int { return 128000 }
+
+// newTestLoop creates a ConversationLoop with bypass permissions
+// and a mock API client for integration testing.
+func newTestLoop(t *testing.T) *ConversationLoop {
+	t.Helper()
+	cfg := LoadConfig()
+	cfg.PermissionMode = "bypass"
+	cfg.MaxTokens = 1024
+	cfg.SessionDir = t.TempDir()
+
+	loop := NewConversationLoop(cfg, mockAPIClient{})
+	loop.PermManager = permissions.NewManager(permissions.ModeBypassPermissions, &permissions.Ruleset{})
+	return loop
+}
+
+// ======================================================================
+// Pipeline integration tests: validateToolInput → ExecuteTool
+// ======================================================================
+
+// TestPipeline_ValidBashCall tests that a well-formed bash tool call
+// passes validation and executes successfully.
+func TestPipeline_ValidBashCall(t *testing.T) {
+	loop := newTestLoop(t)
+
+	input := map[string]any{"command": "echo hello"}
+	result := loop.ExecuteTool("bash", input)
+
+	if result.IsError {
+		t.Fatalf("valid bash call returned error: %s", result.Content[0].Text)
+	}
+	text := result.Content[0].Text
+	if !strings.Contains(text, "hello") {
+		t.Errorf("bash output missing 'hello': %q", text)
+	}
+}
+
+// TestPipeline_MissingRequiredField tests that a bash call without
+// the required "command" field is rejected by schema validation.
+func TestPipeline_MissingRequiredField(t *testing.T) {
+	loop := newTestLoop(t)
+
+	input := map[string]any{} // missing "command"
+	result := loop.ExecuteTool("bash", input)
+
+	if !result.IsError {
+		t.Fatal("expected IsError=true for missing required field")
+	}
+	text := result.Content[0].Text
+	if !strings.Contains(text, "command") {
+		t.Errorf("error message missing field name: %q", text)
+	}
+	if !strings.Contains(text, "required") {
+		t.Errorf("error message missing 'required': %q", text)
+	}
+}
+
+// TestPipeline_TypeMismatch tests that a bash call with the wrong
+// type for "command" (integer instead of string) is rejected.
+func TestPipeline_TypeMismatch(t *testing.T) {
+	loop := newTestLoop(t)
+
+	input := map[string]any{"command": 42} // int, not string
+	result := loop.ExecuteTool("bash", input)
+
+	if !result.IsError {
+		t.Fatal("expected IsError=true for type mismatch")
+	}
+	text := result.Content[0].Text
+	if !strings.Contains(text, "command") {
+		t.Errorf("error message missing field name: %q", text)
+	}
+}
+
+// TestPipeline_ValidTodoWrite tests that a well-formed todo_write call
+// with action="read" passes validation and executes.
+func TestPipeline_ValidTodoWrite(t *testing.T) {
+	loop := newTestLoop(t)
+	_ = os.Chdir(t.TempDir()) // isolate from project's .claude dir
+
+	input := map[string]any{"action": "read"}
+	result := loop.ExecuteTool("todo_write", input)
+
+	if result.IsError {
+		t.Fatalf("valid todo_write read returned error: %s", result.Content[0].Text)
+	}
+}
+
+// TestPipeline_TodoWriteEnumViolation tests that todo_write with an
+// invalid action enum value ("delete" instead of "read"/"write") is
+// rejected by the lightweight validator. Note: the lightweight
+// ValidateToolCallArguments only checks required+type, so enum
+// violations pass through it. This test documents the current
+// behavior and will be updated when strict validation is wired in.
+func TestPipeline_TodoWriteEnumViolation_Lightweight(t *testing.T) {
+	loop := newTestLoop(t)
+
+	// The lightweight validator doesn't check enums, so "delete"
+	// passes validation and the tool itself returns an error.
+	input := map[string]any{"action": "delete"}
+	result := loop.ExecuteTool("todo_write", input)
+
+	if !result.IsError {
+		t.Fatal("expected error for invalid action enum")
+	}
+	text := result.Content[0].Text
+	// The error comes from the tool implementation, not schema validation
+	if !strings.Contains(text, "delete") && !strings.Contains(text, "action") {
+		t.Errorf("error message should mention the invalid action: %q", text)
+	}
+}
+
+// TestPipeline_TodoWriteMissingAction tests that todo_write with no
+// "action" field is rejected at the schema validation layer.
+func TestPipeline_TodoWriteMissingAction(t *testing.T) {
+	loop := newTestLoop(t)
+
+	input := map[string]any{} // missing required "action"
+	result := loop.ExecuteTool("todo_write", input)
+
+	if !result.IsError {
+		t.Fatal("expected IsError=true for missing action")
+	}
+	text := result.Content[0].Text
+	if !strings.Contains(text, "action") {
+		t.Errorf("error message missing field name: %q", text)
+	}
+}
+
+// TestPipeline_WriteFileMissingPath tests that write_file without the
+// required "path" field is rejected at the schema validation layer.
+func TestPipeline_WriteFileMissingPath(t *testing.T) {
+	loop := newTestLoop(t)
+
+	input := map[string]any{"content": "hello"} // missing "path"
+	result := loop.ExecuteTool("write_file", input)
+
+	if !result.IsError {
+		t.Fatal("expected IsError=true for missing path")
+	}
+	text := result.Content[0].Text
+	if !strings.Contains(text, "path") {
+		t.Errorf("error message missing field name: %q", text)
+	}
+}
+
+// TestPipeline_ReadFileWithWrongType tests that read_file with a numeric
+// "path" (instead of string) is rejected at the schema validation layer.
+func TestPipeline_ReadFileWithWrongType(t *testing.T) {
+	loop := newTestLoop(t)
+
+	input := map[string]any{"path": 12345} // int, not string
+	result := loop.ExecuteTool("read_file", input)
+
+	if !result.IsError {
+		t.Fatal("expected IsError=true for wrong type")
+	}
+	text := result.Content[0].Text
+	if !strings.Contains(text, "path") {
+		t.Errorf("error message missing field name: %q", text)
+	}
+}
+
+// ======================================================================
+// Self-healing integration tests
+// ======================================================================
+
+// TestSelfHealingIntegration_MalformedJSON tests the full self-healing
+// path: when the model emits malformed JSON for a tool call,
+// HealToolInput produces an error tool_result that the model can
+// self-correct on the next turn.
+func TestSelfHealingIntegration_MalformedJSON(t *testing.T) {
+	raw := `{"command":` // truncated
+	var inputMap map[string]any
+	err := json.Unmarshal([]byte(raw), &inputMap)
+
+	healed := HealToolInput("bash", raw, err)
+	if healed == nil {
+		t.Fatal("expected healed tool_result for malformed JSON")
+	}
+	if healed.Type != "tool_result" {
+		t.Errorf("healed.Type = %q, want tool_result", healed.Type)
+	}
+	if !healed.IsError {
+		t.Error("healed.IsError = false, want true")
+	}
+	text := healed.Content[0].Text
+	if !strings.Contains(text, "bash") {
+		t.Errorf("healed text missing tool name: %q", text)
+	}
+	if !strings.Contains(text, "JSON") {
+		t.Errorf("healed text missing 'JSON': %q", text)
+	}
+}
+
+// TestSelfHealingIntegration_MissingRequired tests that HealToolInput
+// catches missing required fields in valid JSON.
+func TestSelfHealingIntegration_MissingRequired(t *testing.T) {
+	raw := `{}` // valid JSON, but "command" is required
+	var inputMap map[string]any
+	_ = json.Unmarshal([]byte(raw), &inputMap)
+
+	healed := HealToolInput("bash", raw, nil)
+	if healed == nil {
+		t.Fatal("expected healed tool_result for missing required field")
+	}
+	if !healed.IsError {
+		t.Error("healed.IsError = false, want true")
+	}
+	text := healed.Content[0].Text
+	if !strings.Contains(text, "command") {
+		t.Errorf("healed text missing required field name: %q", text)
+	}
+}
+
+// TestSelfHealingIntegration_ValidArgs tests that HealToolInput returns
+// nil for valid JSON with all required fields present.
+func TestSelfHealingIntegration_ValidArgs(t *testing.T) {
+	raw := `{"command": "ls"}`
+	var inputMap map[string]any
+	err := json.Unmarshal([]byte(raw), &inputMap)
+
+	healed := HealToolInput("bash", raw, err)
+	if healed != nil {
+		t.Errorf("expected nil for valid JSON, got: %+v", healed)
+	}
+}
+
+// ======================================================================
+// Strict validation integration tests
+// ======================================================================
+
+// TestStrictValidation_EnumViolation tests that strict validation
+// catches enum violations that the lightweight validator misses.
+func TestStrictValidation_EnumViolation(t *testing.T) {
+	schema, ok := tools.Schema("todo_write")
+	if !ok {
+		t.Fatal("todo_write schema not found")
+	}
+
+	// "action" has Enum: ["read", "write"], "delete" is invalid
+	args := map[string]any{"action": "delete"}
+	err := api.StrictValidateToolCallArguments("todo_write", args, schema)
+	if err == nil {
+		t.Fatal("strict validation should reject enum violation")
+	}
+	if !errors.Is(err, api.ErrSchema) {
+		t.Errorf("error should wrap ErrSchema: %v", err)
+	}
+}
+
+// TestStrictValidation_EnumValid tests that strict validation accepts
+// a valid enum value.
+func TestStrictValidation_EnumValid(t *testing.T) {
+	schema, ok := tools.Schema("todo_write")
+	if !ok {
+		t.Fatal("todo_write schema not found")
+	}
+
+	args := map[string]any{"action": "read"}
+	err := api.StrictValidateToolCallArguments("todo_write", args, schema)
+	if err != nil {
+		t.Errorf("strict validation should accept valid enum: %v", err)
+	}
+}
+
+// TestStrictValidation_ArrayItemEnum tests that strict validation
+// catches enum violations inside array items (todos[].status).
+func TestStrictValidation_ArrayItemEnum(t *testing.T) {
+	schema, ok := tools.Schema("todo_write")
+	if !ok {
+		t.Fatal("todo_write schema not found")
+	}
+
+	// todos[].status has Enum: ["pending", "in_progress", "done"]
+	// "blocked" is invalid
+	args := map[string]any{
+		"action": "write",
+		"todos": []any{
+			map[string]any{
+				"id":       "1",
+				"content":  "test task",
+				"status":   "blocked", // invalid enum
+				"priority": "high",
+			},
+		},
+	}
+	err := api.StrictValidateToolCallArguments("todo_write", args, schema)
+	if err == nil {
+		t.Fatal("strict validation should reject array item enum violation")
+	}
+	if !errors.Is(err, api.ErrSchema) {
+		t.Errorf("error should wrap ErrSchema: %v", err)
+	}
+}
+
+// TestStrictValidation_ArrayItemMissingRequired tests that strict
+// validation catches missing required fields inside array items
+// (todos[] requires "id", "content", "status", "priority").
+func TestStrictValidation_ArrayItemMissingRequired(t *testing.T) {
+	schema, ok := tools.Schema("todo_write")
+	if !ok {
+		t.Fatal("todo_write schema not found")
+	}
+
+	// Missing "content" and "status" from todo item
+	args := map[string]any{
+		"action": "write",
+		"todos": []any{
+			map[string]any{
+				"id":       "1",
+				"priority": "high",
+				// missing "content" and "status"
+			},
+		},
+	}
+	err := api.StrictValidateToolCallArguments("todo_write", args, schema)
+	if err == nil {
+		t.Fatal("strict validation should reject missing required fields in array items")
+	}
+	if !errors.Is(err, api.ErrSchema) {
+		t.Errorf("error should wrap ErrSchema: %v", err)
+	}
+}
+
+// TestStrictValidation_ArrayItemPriorityEnum tests that strict
+// validation catches invalid enum on the "priority" field inside
+// array items (todos[].priority has Enum: ["high", "medium", "low"]).
+func TestStrictValidation_ArrayItemPriorityEnum(t *testing.T) {
+	schema, ok := tools.Schema("todo_write")
+	if !ok {
+		t.Fatal("todo_write schema not found")
+	}
+
+	args := map[string]any{
+		"action": "write",
+		"todos": []any{
+			map[string]any{
+				"id":       "1",
+				"content":  "test task",
+				"status":   "pending",
+				"priority": "urgent", // invalid enum
+			},
+		},
+	}
+	err := api.StrictValidateToolCallArguments("todo_write", args, schema)
+	if err == nil {
+		t.Fatal("strict validation should reject invalid priority enum")
+	}
+	if !errors.Is(err, api.ErrSchema) {
+		t.Errorf("error should wrap ErrSchema: %v", err)
+	}
+}
+
+// TestStrictValidation_ValidTodoWrite tests that a fully valid
+// todo_write with enriched schema passes strict validation.
+func TestStrictValidation_ValidTodoWrite(t *testing.T) {
+	schema, ok := tools.Schema("todo_write")
+	if !ok {
+		t.Fatal("todo_write schema not found")
+	}
+
+	args := map[string]any{
+		"action": "write",
+		"todos": []any{
+			map[string]any{
+				"id":       "1",
+				"content":  "implement feature X",
+				"status":   "pending",
+				"priority": "high",
+			},
+			map[string]any{
+				"id":       "2",
+				"content":  "write tests",
+				"status":   "in_progress",
+				"priority": "medium",
+			},
+		},
+	}
+	err := api.StrictValidateToolCallArguments("todo_write", args, schema)
+	if err != nil {
+		t.Errorf("strict validation should accept valid todo_write: %v", err)
+	}
+}
+
+// ======================================================================
+// validateToolInput integration tests
+// ======================================================================
+
+// TestValidateToolInput_UnknownTool tests that validateToolInput
+// returns nil for tools not in the schema registry (MCP tools).
+func TestValidateToolInput_UnknownTool(t *testing.T) {
+	loop := newTestLoop(t)
+
+	err := loop.validateToolInput("unknown_mcp_tool", map[string]any{})
+	if err != nil {
+		t.Errorf("validateToolInput should return nil for unknown tools, got: %v", err)
+	}
+}
+
+// TestValidateToolInput_KnownTool_Valid tests that validateToolInput
+// passes valid args for a known tool.
+func TestValidateToolInput_KnownTool_Valid(t *testing.T) {
+	loop := newTestLoop(t)
+
+	err := loop.validateToolInput("bash", map[string]any{"command": "ls"})
+	if err != nil {
+		t.Errorf("validateToolInput should accept valid args, got: %v", err)
+	}
+}
+
+// TestValidateToolInput_KnownTool_Invalid tests that validateToolInput
+// rejects invalid args for a known tool.
+func TestValidateToolInput_KnownTool_Invalid(t *testing.T) {
+	loop := newTestLoop(t)
+
+	err := loop.validateToolInput("bash", map[string]any{})
+	if err == nil {
+		t.Fatal("validateToolInput should reject missing required field")
+	}
+	if !errors.Is(err, api.ErrSchema) {
+		t.Errorf("error should wrap ErrSchema: %v", err)
+	}
+}
+
+// ======================================================================
+// ExecuteToolQuiet integration tests
+// ======================================================================
+
+// TestPipelineQuiet_ValidBashCall tests ExecuteToolQuiet with valid input.
+func TestPipelineQuiet_ValidBashCall(t *testing.T) {
+	loop := newTestLoop(t)
+
+	input := map[string]any{"command": "echo hello"}
+	result := loop.ExecuteToolQuiet("bash", input)
+
+	if result.IsError {
+		t.Fatalf("valid bash call returned error: %s", result.Content[0].Text)
+	}
+}
+
+// TestPipelineQuiet_MissingRequiredField tests ExecuteToolQuiet
+// schema rejection.
+func TestPipelineQuiet_MissingRequiredField(t *testing.T) {
+	loop := newTestLoop(t)
+
+	input := map[string]any{} // missing "command"
+	result := loop.ExecuteToolQuiet("bash", input)
+
+	if !result.IsError {
+		t.Fatal("expected IsError=true for missing required field")
+	}
+}
+
+// ======================================================================
+// End-to-end pipeline test: XML → parse → validate → execute
+// ======================================================================
+
+// TestE2E_XmlToExecution tests the full pipeline from XML extraction
+// through schema validation to tool execution.
+func TestE2E_XmlToExecution(t *testing.T) {
+	loop := newTestLoop(t)
+
+	// Step 1: Model emits XML tool call
+	xml := `<tool_calls><invoke name="bash"><parameter name="command">echo integration-test-pass</parameter></invoke></tool_calls>`
+
+	// Step 2: Extract tool calls from XML
+	toolCalls := api.ExtractXmlToolCalls(xml)
+	if len(toolCalls) != 1 {
+		t.Fatalf("ExtractXmlToolCalls returned %d calls, want 1", len(toolCalls))
+	}
+	tc := toolCalls[0]
+	if tc.Name != "bash" {
+		t.Errorf("tool name = %q, want bash", tc.Name)
+	}
+
+	// Step 3: Parse JSON arguments
+	var inputMap map[string]any
+	if err := json.Unmarshal([]byte(tc.Arguments), &inputMap); err != nil {
+		// Try self-healing
+		healed := HealToolInput(tc.Name, tc.Arguments, err)
+		if healed != nil {
+			t.Fatalf("self-healing kicked in but shouldn't have for valid JSON: %s", healed.Content[0].Text)
+		}
+		t.Fatalf("JSON parse failed: %v", err)
+	}
+
+	// Step 4: Validate against schema
+	if err := loop.validateToolInput(tc.Name, inputMap); err != nil {
+		t.Fatalf("validateToolInput rejected valid input: %v", err)
+	}
+
+	// Step 5: Execute tool
+	result := loop.ExecuteTool(tc.Name, inputMap)
+	if result.IsError {
+		t.Fatalf("ExecuteTool returned error: %s", result.Content[0].Text)
+	}
+	if !strings.Contains(result.Content[0].Text, "integration-test-pass") {
+		t.Errorf("bash output missing expected text: %q", result.Content[0].Text)
+	}
+}
+
+// TestE2E_XmlWithMissingArgs tests the full pipeline when XML tool call
+// is missing a required argument.
+func TestE2E_XmlWithMissingArgs(t *testing.T) {
+	loop := newTestLoop(t)
+
+	// Model emits bash tool call without command parameter
+	xml := `<tool_calls><invoke name="bash"></invoke></tool_calls>`
+
+	toolCalls := api.ExtractXmlToolCalls(xml)
+	if len(toolCalls) != 1 {
+		t.Fatalf("ExtractXmlToolCalls returned %d calls, want 1", len(toolCalls))
+	}
+	tc := toolCalls[0]
+
+	var inputMap map[string]any
+	if tc.Arguments != "" {
+		_ = json.Unmarshal([]byte(tc.Arguments), &inputMap)
+	}
+	if inputMap == nil {
+		inputMap = map[string]any{}
+	}
+
+	// Self-healing should catch the missing required field
+	healed := HealToolInput(tc.Name, "{}", nil)
+	if healed == nil {
+		t.Fatal("HealToolInput should catch missing 'command' field")
+	}
+	if !healed.IsError {
+		t.Error("healed result should be an error")
+	}
+	text := healed.Content[0].Text
+	if !strings.Contains(text, "command") {
+		t.Errorf("error should mention 'command': %q", text)
+	}
+}
+
+// TestE2E_XmlWithMalformedJSON tests the full pipeline when XML tool call
+// has malformed JSON arguments.
+func TestE2E_XmlWithMalformedJSON(t *testing.T) {
+	loop := newTestLoop(t)
+
+	// Model emits bash tool call with truncated JSON
+	xml := `<tool_calls><invoke name="bash"><parameter name="command">echo hello</parameter></invoke></tool_calls>`
+
+	toolCalls := api.ExtractXmlToolCalls(xml)
+	if len(toolCalls) != 1 {
+		t.Fatalf("ExtractXmlToolCalls returned %d calls, want 1", len(toolCalls))
+	}
+
+	// Simulate malformed JSON in inputBuffer (as would happen in streaming)
+	malformedRaw := `{"command":`
+	var inputMap map[string]any
+	err := json.Unmarshal([]byte(malformedRaw), &inputMap)
+
+	healed := HealToolInput("bash", malformedRaw, err)
+	if healed == nil {
+		t.Fatal("HealToolInput should produce error for malformed JSON")
+	}
+	if !healed.IsError {
+		t.Error("healed result should be an error")
+	}
+	text := healed.Content[0].Text
+	if !strings.Contains(text, "JSON") {
+		t.Errorf("error should mention 'JSON': %q", text)
+	}
+}
+
+// TestE2E_StrictValidationInPipeline tests that strict validation
+// correctly catches enum violations in the full pipeline context.
+// This documents the gap: currently validateToolInput uses only
+// lightweight validation, so enum violations pass through to the
+// tool implementation. When strict validation is wired in, this
+// test should be updated.
+func TestE2E_StrictValidationInPipeline(t *testing.T) {
+	schema, ok := tools.Schema("todo_write")
+	if !ok {
+		t.Fatal("todo_write schema not found")
+	}
+
+	// Invalid action enum — lightweight misses it, strict catches it
+	args := map[string]any{"action": "delete"}
+
+	// Lightweight (current validateToolInput path)
+	lightweightErr := api.ValidateToolCallArguments("todo_write", args, schema)
+	if lightweightErr != nil {
+		t.Logf("lightweight validation caught it (unexpected but good): %v", lightweightErr)
+	} else {
+		t.Log("lightweight validation missed enum violation (expected — it only checks required+type)")
+	}
+
+	// Strict (should catch it)
+	strictErr := api.StrictValidateToolCallArguments("todo_write", args, schema)
+	if strictErr == nil {
+		t.Fatal("strict validation should catch enum violation")
+	}
+	if !errors.Is(strictErr, api.ErrSchema) {
+		t.Errorf("strict error should wrap ErrSchema: %v", strictErr)
+	}
+}
+
+// TestE2E_StrictValidationNestedArray tests strict validation
+// catching nested errors in todo_write array items.
+func TestE2E_StrictValidationNestedArray(t *testing.T) {
+	schema, ok := tools.Schema("todo_write")
+	if !ok {
+		t.Fatal("todo_write schema not found")
+	}
+
+	testCases := []struct {
+		name string
+		args map[string]any
+		want string // substring expected in error
+	}{
+		{
+			name: "invalid status enum in array item",
+			args: map[string]any{
+				"action": "write",
+				"todos": []any{
+					map[string]any{
+						"id":       "1",
+						"content":  "task",
+						"status":   "unknown",
+						"priority": "high",
+					},
+				},
+			},
+			want: "status",
+		},
+		{
+			name: "invalid priority enum in array item",
+			args: map[string]any{
+				"action": "write",
+				"todos": []any{
+					map[string]any{
+						"id":       "1",
+						"content":  "task",
+						"status":   "pending",
+						"priority": "critical",
+					},
+				},
+			},
+			want: "priority",
+		},
+		{
+			name: "missing required fields in array item",
+			args: map[string]any{
+				"action": "write",
+				"todos": []any{
+					map[string]any{
+						"id": "1",
+						// missing content, status, priority
+					},
+				},
+			},
+			want: "required",
+		},
+		{
+			name: "non-string status in array item",
+			args: map[string]any{
+				"action": "write",
+				"todos": []any{
+					map[string]any{
+						"id":       "1",
+						"content":  "task",
+						"status":   42,
+						"priority": "high",
+					},
+				},
+			},
+			want: "status",
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := api.StrictValidateToolCallArguments("todo_write", tc.args, schema)
+			if err == nil {
+				t.Fatal("expected error from strict validation")
+			}
+			errText := err.Error()
+			if !strings.Contains(strings.ToLower(errText), strings.ToLower(tc.want)) {
+				t.Errorf("error %q should contain %q", errText, tc.want)
+			}
+		})
+	}
+}
+
+// TestE2E_FullValidTodoWrite tests the complete end-to-end flow for
+// a valid todo_write call with array items through strict validation.
+func TestE2E_FullValidTodoWrite(t *testing.T) {
+	schema, ok := tools.Schema("todo_write")
+	if !ok {
+		t.Fatal("todo_write schema not found")
+	}
+
+	args := map[string]any{
+		"action": "write",
+		"todos": []any{
+			map[string]any{
+				"id":       "t1",
+				"content":  "implement pipeline integration tests",
+				"status":   "in_progress",
+				"priority": "high",
+			},
+			map[string]any{
+				"id":       "t2",
+				"content":  "wire strict validation into validateToolInput",
+				"status":   "pending",
+				"priority": "medium",
+			},
+		},
+	}
+
+	err := api.StrictValidateToolCallArguments("todo_write", args, schema)
+	if err != nil {
+		t.Errorf("valid todo_write should pass strict validation: %v", err)
+	}
+}
+
+// ======================================================================
+// Benchmarks
+// ======================================================================
+
+func BenchmarkPipeline_ExecuteBash(b *testing.B) {
+	cfg := LoadConfig()
+	cfg.PermissionMode = "bypass"
+	cfg.MaxTokens = 1024
+	cfg.SessionDir = b.TempDir()
+
+	loop := NewConversationLoop(cfg, mockAPIClient{})
+	loop.PermManager = permissions.NewManager(permissions.ModeBypassPermissions, &permissions.Ruleset{})
+
+	input := map[string]any{"command": "echo benchmark"}
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		loop.ExecuteTool("bash", input)
+	}
+}
+
+func BenchmarkPipeline_ExecuteBashInvalid(b *testing.B) {
+	cfg := LoadConfig()
+	cfg.PermissionMode = "bypass"
+	cfg.MaxTokens = 1024
+	cfg.SessionDir = b.TempDir()
+
+	loop := NewConversationLoop(cfg, mockAPIClient{})
+	loop.PermManager = permissions.NewManager(permissions.ModeBypassPermissions, &permissions.Ruleset{})
+
+	input := map[string]any{} // missing command — triggers validation
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		loop.ExecuteTool("bash", input)
+	}
+}
+
+func BenchmarkPipeline_ValidateToolInput(b *testing.B) {
+	cfg := LoadConfig()
+	cfg.PermissionMode = "bypass"
+	cfg.MaxTokens = 1024
+	cfg.SessionDir = b.TempDir()
+
+	loop := NewConversationLoop(cfg, mockAPIClient{})
+	loop.PermManager = permissions.NewManager(permissions.ModeBypassPermissions, &permissions.Ruleset{})
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		loop.validateToolInput("bash", map[string]any{"command": "ls"})
+	}
+}
+
+func BenchmarkPipeline_StrictValidationTodoWrite(b *testing.B) {
+	schema, _ := tools.Schema("todo_write")
+	args := map[string]any{
+		"action": "write",
+		"todos": []any{
+			map[string]any{
+				"id":       "1",
+				"content":  "benchmark task",
+				"status":   "pending",
+				"priority": "high",
+			},
+		},
+	}
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		api.StrictValidateToolCallArguments("todo_write", args, schema)
+	}
+}
+
+// needed for context import in mockAPIClient
+var _ = fmt.Sprintf

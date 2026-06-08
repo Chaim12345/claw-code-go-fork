@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"regexp"
 	"strings"
 	"text/template"
@@ -72,94 +73,65 @@ type RalphConfig struct {
 	// provider's ResetSession() is NOT called between iterations
 	// so the server maintains the full conversation.
 	DeltaMode bool
+
+	// IterationTimeout caps how long a single iteration may run.
+	// 0 means use DefaultRalphIterationTimeout. Prevents the model
+	// from hanging indefinitely on a single turn.
+	IterationTimeout time.Duration
+
+	// ProgressNotes is injected into the next iteration's prompt
+	// so the model knows what happened in prior iterations. The
+	// loop populates this automatically after each iteration when
+	// ProgressTracking is enabled.
+	ProgressNotes string
+
+	// ProgressTracking enables per-iteration git diff summary and
+	// tool-call tracking. When true, after each iteration the loop
+	// captures git diff stats and checks whether the model only
+	// read files without writing. Results are injected into
+	// ProgressNotes for the next iteration.
+	ProgressTracking bool
 }
 
 // Defaults for the Ralph loop.
 const (
-	DefaultRalphSpecPath      = "ROADMAP.md"
-	DefaultRalphDoneSentinel  = "RALPH_DONE"
-	DefaultRalphMaxIterations = 50
-	MaxRalphIterations        = 500
-	defaultRalphPromptTemplate = `You are an autonomous coding agent running in a Ralph loop.
+	DefaultRalphSpecPath          = "ROADMAP.md"
+	DefaultRalphDoneSentinel      = "RALPH_DONE"
+	DefaultRalphMaxIterations     = 50
+	MaxRalphIterations            = 500
+	DefaultRalphIterationTimeout  = 5 * time.Minute
+	defaultRalphPromptTemplate = `Ralph autonomous agent — iteration {{.Iteration}}/{{.MaxIterations}}.
 
-Iteration {{.Iteration}} of {{.MaxIterations}}.
+Read spec at {{.SpecPath}}. Pick the NEXT unchecked item. Implement it NOW.
 
-A spec file lives at {{.SpecPath}}. Read it. It contains a list of items (tasks, fixes, features) the codebase should implement. Your job, in this iteration, is to make progress on exactly one item:
+WORKFLOW (strict order):
+1. Read spec file, identify next [ ] item
+2. Read ONLY the files you must change (batch all reads)
+3. Write ALL edits (batch all file_edit/write_file calls)
+4. Run build+test (ONE bash call)
+5. Mark item done in spec ([x])
+6. Commit
 
-  1. Read the spec file at {{.SpecPath}}.
-  2. Find the next item that is NOT marked done (e.g. checkbox is [ ] or status is TODO/pending).
-  3. Implement it: read, edit, build, test. Use the full tool set.
-  4. Verify the change actually works (run the test, build the binary, or whatever proves the item is done).
-  5. Mark the item done in the spec file (e.g. change [ ] to [x], or add a "Done" annotation, or move it under a "Completed" heading).
-  6. Commit the change with a clear conventional-commit message.
-  7. Output a one-paragraph summary of what you did.
+HARD RULES:
+- NEVER read a file without editing it in the SAME iteration
+- NEVER read files one-at-a-time — batch ALL reads first
+- NEVER edit one field at a time — batch ALL edits
+- NEVER leave an iteration without at least one file change
+- If you cannot implement an item, mark it [BLOCKED] and move on
+- Output RALPH_DONE on its own line when ALL items are checked
 
-CRITICAL: Batch all your work into as FEW tool calls as possible. Every tool call adds to the conversation and consumes token budget. Follow this pattern:
-  - FIRST: Read ALL files you need in a single batch of read_file calls.
-  - THEN: Plan all changes at once.
-  - THEN: Make ALL edits in a single batch of file_edit calls (one per file).
-  - THEN: Run ONE bash command to build/test.
-  Do NOT read files one at a time. Do NOT edit files one field at a time.
-
-If all items in the spec are already done, output the literal sentinel {{.Sentinel}} on its own line and stop.
-
-If you hit a real blocker (a missing dependency, a question only the human can answer, a contradiction in the spec), document it under a "## Blockers" heading at the bottom of the spec file with enough detail for the next iteration to pick up — then exit normally. The next iteration will start fresh with your note.
-
-The spec file is your persistent memory. Each iteration you will get a fresh context. Do not assume anything from prior turns survives; write everything important to the spec.
-
-The spec content is shown below for convenience — it is the live file, so re-read it from disk if you suspect it has changed.
-
---- BEGIN SPEC ({{.SpecPath}}) ---
+Spec ({{.SpecPath}}):
 
 {{.Spec}}
 
---- END SPEC ---
-
+{{if .ProgressNotes}}
+LAST ITERATION:
+{{.ProgressNotes}}
+{{end}}
 {{if .LastError}}
----
-
-## Self-debug task
-
-Your previous iteration failed with this error:
-
-    {{.LastError}}
-
-You are the developer. You are the debugger. Treat this as a real
-bug report about your own work — or about the environment you run in.
-
-**Your job for THIS iteration**: investigate and fix the root cause,
-then resume work on the spec above.
-
-Concrete steps:
-  1. Reproduce the error if possible (read the relevant code, run
-     the failing command yourself).
-  2. Identify the smallest fix:
-     - Missing tool / binary on PATH → install it, add it to PATH,
-       or symlink it (example: ln -s /usr/local/go/bin/go /usr/local/bin/go).
-     - Missing env var → export it before re-running, or document it
-       in a script.
-     - Wrong API / signature mismatch → read the actual definition
-       and reconcile.
-     - Rate limit / transient → the loop already retries with
-       backoff and rotates tokens. If you're still seeing it after
-       the loop retried, the issue is upstream; do not loop on it.
-  3. Apply the fix.
-  4. Verify the fix actually works (run the previously-failing
-     command, run go test ./..., etc.).
-  5. Commit the fix as a separate atomic commit.
-  6. Resume work on the spec: pick the next open item, implement,
-     test, commit, mark done.
-  7. Output a one-paragraph summary that BEGINS with
-     "DEBUG: <root cause>" so the next iteration can see what you
-     diagnosed, even if you also made spec progress.
-
-If your investigation reveals the error is non-recoverable
-(corrupted filesystem, unrecoverable auth failure, spec is
-intrinsically wrong), document it under "## Blockers" in the
-spec and exit normally — same as the regular blocker protocol.
-
-**This is your only chance to fix this.** If you cannot fix it
-in this iteration, the loop will give up entirely.
+SELF-DEBUG — previous iteration crashed:
+{{.LastError}}
+Fix the root cause, then continue on the spec.
 {{end}}`
 )
 
@@ -167,11 +139,13 @@ in this iteration, the loop will give up entirely.
 // populated. Callers may override individual fields after.
 func DefaultRalphConfig() RalphConfig {
 	return RalphConfig{
-		SpecPath:       DefaultRalphSpecPath,
-		MaxIterations:  DefaultRalphMaxIterations,
-		DoneSentinel:   DefaultRalphDoneSentinel,
-		PromptTemplate: defaultRalphPromptTemplate,
-		SelfDebug:      true,
+		SpecPath:         DefaultRalphSpecPath,
+		MaxIterations:    DefaultRalphMaxIterations,
+		DoneSentinel:     DefaultRalphDoneSentinel,
+		PromptTemplate:   defaultRalphPromptTemplate,
+		SelfDebug:        true,
+		IterationTimeout: DefaultRalphIterationTimeout,
+		ProgressTracking: true,
 	}
 }
 
@@ -215,6 +189,55 @@ var openTaskPattern = regexp.MustCompile(`(?m)^\s*(?:-|\*|\d+\.)\s+\[(?:\s|todo|
 // present in the spec body. Empty or all-checked specs return true.
 func RalphSpecIsComplete(spec string) bool {
 	return !openTaskPattern.MatchString(spec)
+}
+
+// ralphToolSummary counts read vs write tool calls in the session
+// messages from the most recent iteration. Returns (reads, writes).
+func ralphToolSummary(messages []api.Message) (reads, writes int) {
+	for _, msg := range messages {
+		if msg.Role != "assistant" {
+			continue
+		}
+		for _, cb := range msg.Content {
+			if cb.Type != "tool_use" {
+				continue
+			}
+			switch cb.Name {
+			case "read_file", "glob", "grep":
+				reads++
+			case "write_file", "file_edit", "bash":
+				writes++
+			}
+		}
+	}
+	return
+}
+
+// ralphGitDiff returns the git diff --stat output for the working
+// directory, or an empty string if git is unavailable.
+func ralphGitDiff() string {
+	out, err := exec.Command("git", "diff", "--stat").Output()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(out))
+}
+
+// ralphBuildProgressNotes generates a progress summary for injection
+// into the next iteration's prompt. It includes git diff stats and
+// a warning if the iteration only read files without writing.
+func ralphBuildProgressNotes(reads, writes int, gitDiff string) string {
+	var b strings.Builder
+	if gitDiff != "" {
+		b.WriteString("Git changes:\n")
+		b.WriteString(gitDiff)
+		b.WriteString("\n")
+	}
+	fmt.Fprintf(&b, "Tool calls: %d reads, %d writes\n", reads, writes)
+	if writes == 0 && reads > 0 {
+		b.WriteString("WARNING: last iteration only READ files — no edits made. You MUST write code this iteration.\n")
+	}
+	return b.String()
 }
 
 // RalphVerdictKind is the outcome of a single iteration.
@@ -267,6 +290,13 @@ func RalphVerdict(finalText, specBody string, cfg RalphConfig) RalphVerdictKind 
 // call ResetSession() on the client before each iteration (see
 // RunRalphLoop for the wiring).
 func RalphOneIteration(ctx context.Context, loop *ConversationLoop, cfg RalphConfig, iteration, maxIter int) (RalphVerdictKind, string, error) {
+	timeout := cfg.IterationTimeout
+	if timeout <= 0 {
+		timeout = DefaultRalphIterationTimeout
+	}
+	iterCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
 	specBody, err := readRalphSpec(cfg.SpecPath)
 	if err != nil {
 		return RalphVerdictContinue, "", fmt.Errorf("read spec: %w", err)
@@ -275,17 +305,12 @@ func RalphOneIteration(ctx context.Context, loop *ConversationLoop, cfg RalphCon
 	if err != nil {
 		return RalphVerdictContinue, "", err
 	}
-	if err := loop.SendMessage(ctx, prompt); err != nil {
+	if err := loop.SendMessage(iterCtx, prompt); err != nil {
 		return RalphVerdictContinue, "", fmt.Errorf("send: %w", err)
 	}
-	// SendMessage populates loop.Session.Messages with the new
-	// turn. The final assistant text is the last assistant
-	// message's text content.
 	finalText := lastAssistantText(loop.Session.Messages)
-	// Re-read the spec in case the model edited it.
 	updated, err := readRalphSpec(cfg.SpecPath)
 	if err != nil {
-		// Spec disappeared? Treat as done (we'll exit on next check).
 		updated = specBody
 	}
 	return RalphVerdict(finalText, updated, cfg), finalText, nil
@@ -582,22 +607,19 @@ func RunRalphLoop(ctx context.Context, loop *ConversationLoop, cfg RalphConfig) 
 	// last error into the next prompt.
 	cfgPtr := &cfg
 	iter := func(ctx context.Context, i, max int) (RalphVerdictKind, string, error) {
-		// In delta mode, keep the server-side session alive between
-		// iterations so the provider sends only the new message text
-		// via the parent_message_id chain.
 		if !cfgPtr.DeltaMode {
 			if resetter, ok := loop.Client.(api.SessionResetter); ok {
 				resetter.ResetSession()
 			}
 		}
-		// Also clear the loop's local message history. Without
-		// this, every prior user/assistant/tool turn accumulates
-		// in the local Messages slice and gets sent on the next
-		// prompt — even though the server-side session is
-		// fresh. With ClearSession, the next SendMessage sends
-		// ONLY the ralph prompt, keeping the request small.
 		loop.ClearSession()
-		return RalphOneIteration(ctx, loop, *cfgPtr, i, max)
+		v, text, err := RalphOneIteration(ctx, loop, *cfgPtr, i, max)
+		if err == nil && cfgPtr.ProgressTracking {
+			reads, writes := ralphToolSummary(loop.Session.Messages)
+			diff := ralphGitDiff()
+			cfgPtr.ProgressNotes = ralphBuildProgressNotes(reads, writes, diff)
+		}
+		return v, text, err
 	}
 	return RunRalphLoopWithIter(ctx, cfgPtr, iter)
 }
@@ -611,19 +633,21 @@ func RenderRalphPrompt(cfg RalphConfig, specBody string, iteration, maxIter int)
 		return "", fmt.Errorf("parse template: %w", err)
 	}
 	data := struct {
-		Spec          string
-		SpecPath      string
-		Iteration     int
-		MaxIterations int
-		Sentinel      string
-		LastError     string
+		Spec           string
+		SpecPath       string
+		Iteration      int
+		MaxIterations  int
+		Sentinel       string
+		LastError      string
+		ProgressNotes  string
 	}{
-		Spec:          specBody,
-		SpecPath:      cfg.SpecPath,
-		Iteration:     iteration,
-		MaxIterations: maxIter,
-		Sentinel:      cfg.DoneSentinel,
-		LastError:     cfg.LastError,
+		Spec:           specBody,
+		SpecPath:       cfg.SpecPath,
+		Iteration:      iteration,
+		MaxIterations:  maxIter,
+		Sentinel:       cfg.DoneSentinel,
+		LastError:      cfg.LastError,
+		ProgressNotes:  cfg.ProgressNotes,
 	}
 	var buf bytes.Buffer
 	if err := tpl.Execute(&buf, data); err != nil {

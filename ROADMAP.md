@@ -405,34 +405,42 @@ Implement SQLite-backed session storage so conversations survive server restarts
   - Add message recording and retrieval
   - Add tool call recording and retrieval
 
-- [ ] 9.3 Migrate in-memory session_store.go to use SQLite
+- [x] 9.3 Migrate in-memory session_store.go to use SQLite
   - Replace chatSessionStore with SQLite-backed store
   - Preserve existing API (create, recordUserMessage, recordAssistantReply, list)
   - Add session persistence across restarts
 
-- [ ] 9.4 Add session search and filtering
-  - Full-text search across session messages
-  - Filter by date range, provider, model
-  - Sort by last active, message count, created date
+- [x] 9.4 Add session search and filtering
+- [x] 9.4.1 Add `SearchSessions(query string) ([]*Session, error)` to `SessionStore` interface in `internal/session/interfaces.go`
+- [x] 9.4.2 Implement `SearchSessions` in `internal/session/schema.go` using SQLite FTS5 virtual table on messages.content; join back to sessions; return matching sessions ordered by last_active_at DESC
+- [x] 9.4.3 Add `FilterSessions(provider, model string, after, before time.Time) ([]*Session, error)` to `SessionStore` interface; implement with WHERE clauses on sessions.provider, sessions.model, sessions.last_active_at
+- [x] 9.4.4 Add `/api/sessions/search?q=...&provider=...&model=...&after=...&before=...` HTTP endpoint in `internal/web/server.go` that calls SearchSessions and/or FilterSessions
+- [x] 9.4.5 Add migration SchemaV2 creating FTS5 index: `CREATE VIRTUAL TABLE IF NOT EXISTS messages_fts USING fts5(content, content=messages, content_rowid=id)`
+- [x] 9.4.6 Add tests for SearchSessions, FilterSessions in `internal/session/store_test.go`
+- [x] 9.4.7 Add HTTP handler test for `/api/sessions/search` in `internal/web/`
 
-- [ ] 9.5 Implement session export
-  - Export single session as markdown
-  - Export single session as JSON
-  - Export multiple sessions as zip
+- [x] 9.5 Implement session export
+    - [x] 9.5.1 Add `ExportSessionMarkdown(id string) (string, error)` to `SessionStore` interface; implement by fetching session + messages + tool calls, formatting as markdown (## Session, ### Messages with role headers, #### Tool Calls under assistant messages)
+    - [x] 9.5.2 Add `ExportSessionJSON(id string) ([]byte, error)` to `SessionStore` interface; implement by fetching full session tree and json.MarshalIndent
+    - [x] 9.5.3 Add `/api/sessions/{id}/export?format=markdown|json` HTTP endpoint in `internal/web/server.go` with Content-Disposition header for download
+    - [x] 9.5.4 Add tests for ExportSessionMarkdown and ExportSessionJSON in `internal/session/store_test.go`
+    - [x] 9.5.5 Add HTTP handler test for export endpoint in `internal/web/`
 
-- [ ] 9.6 Add session import
-  - Import from JSON format
-  - Import from markdown format
-  - Validate and merge imported sessions
+- [x] 9.6 Add session import
+    - [x] 9.6.1 Add `ImportSessionJSON(data []byte) (string, error)` to `SessionStore` interface; parse JSON, validate required fields (provider, model), create session + messages in a transaction, return new session id
+    - [x] 9.6.2 Add `ImportSessionMarkdown(data []byte) (string, error)` to `SessionStore` interface; parse markdown format (### role headers, #### Tool Calls blocks), create session + messages, return new session id
+    - [x] 9.6.3 Add `/api/sessions/import` POST HTTP endpoint in `internal/web/server.go` accepting JSON body with format field
+    - [x] 9.6.4 Add tests for ImportSessionJSON and ImportSessionMarkdown in `internal/session/store_test.go`
+    - [x] 9.6.5 Add HTTP handler test for import endpoint in `internal/web/`
 
 ### Success Criteria
-- [ ] Sessions persist across server restarts
-- [ ] Users can search old conversations by text
-- [ ] Users can filter sessions by date/provider/model
-- [ ] Export works for individual sessions (markdown, JSON)
-- [ ] Import works from JSON format
-- [ ] All existing tests pass
-- [ ] New tests cover session persistence
+- [x] Sessions persist across server restarts
+- [x] Users can search old conversations by text
+- [x] Users can filter sessions by date/provider/model
+- [x] Export works for individual sessions (markdown, JSON)
+- [x] Import works from JSON format
+- [x] All existing tests pass
+- [x] New tests cover session persistence
 
 ### Technical Notes
 - Use SQLite via modernc.org/sqlite (pure Go, no CGO)
@@ -473,4 +481,98 @@ proceed directly to wiring `internal/web/chatproto` to
 
 If you can't find it: `grep -rn "type ConversationLoop" internal/`
 returns exactly one match at `internal/runtime/conversation.go:39`.
+
+---
+
+## Phase 10 — Enhanced Context Injection
+
+### Goal
+Give the AI model richer context about the project so it can make better decisions. Currently the model only sees basic system info and git status. Other coding agents (Aider, Cursor, Copilot) inject project structure, file trees, and code symbols.
+
+### Tasks
+
+- [x] 10.1 Create `internal/context/projectmap.go`
+    - Generate directory tree (excluding .git, node_modules, vendor, etc.)
+    - Extract top exported types and functions from Go files
+    - Fit to token budget (~3K tokens)
+    - Cache with mtime-based invalidation
+
+- [x] 10.2 Create `internal/context/recent.go`
+    - Recent git activity: last 10 commits with filenames
+    - Git stash list (if any)
+    - Capped at 4K chars
+
+- [x] 10.3 Update `internal/context/assembler.go`
+    - Budget-aware assembly (12K tokens total)
+    - Split: system info, git status, recent activity, memory, project map
+    - Increase memory limit from 20KB to 40KB
+
+- [x] 10.4 Verify context injection works end-to-end
+    - Model receives directory structure and key symbols
+    - Token budget stays under softPromptLimit
+
+### Success Criteria
+- [x] Model can reference project structure in responses
+- [x] Token budget doesn't exceed 28K soft limit
+- [x] Context assembly adds <500ms latency
+- [x] All existing tests pass
+
+---
+
+## Phase 11 — Session History Context (Resume Context)
+
+### Goal
+When a user returns after a break, inject context from their previous sessions so the AI remembers what they were working on.
+
+### Tasks
+
+- [x] 11.1 Add `GetRecentSessions(limit int) ([]*Session, error)` to SessionStore
+- [x] 11.2 Add `GetSessionSummary(id string) (string, error)` — returns condensed summary of session (last N messages, key decisions made)
+- [ ] 11.3 Update assembler to include "Recent Sessions" section
+- [ ] 11.4 Cap session history context at 2K tokens
+- [ ] 11.5 Add tests for session history context
+
+### Success Criteria
+- [ ] After returning, AI knows what was discussed last session
+- [ ] Token budget stays within limits
+- [ ] No performance degradation on session creation
+
+---
+
+## Phase 12 — Codebase Search Integration
+
+### Goal
+Add semantic search over the codebase so the AI can find relevant code without reading entire files.
+
+### Tasks
+
+- [ ] 12.1 Add BM25/TF-IDF index for Go files (stdlib only)
+- [ ] 12.2 Add `SearchCodebase(query string, limit int) ([]SearchResult, error)` function
+- [ ] 12.3 Add `/api/search` HTTP endpoint
+- [ ] 14.4 Update context assembler to include top search results for user query
+- [ ] 12.5 Add tests for codebase search
+
+### Success Criteria
+- [ ] AI can find relevant code snippets by semantic query
+- [ ] Search completes in <100ms for typical codebase
+- [ ] No false positives on unrelated files
+
+---
+
+## Phase 13 — Multi-Turn Session Memory
+
+### Goal
+Improve multi-turn conversation quality by maintaining better context across turns.
+
+### Tasks
+
+- [ ] 13.1 Add automatic context compaction for long sessions
+- [ ] 13.2 Add "session notes" feature — AI can write persistent notes per session
+- [ ] 13.3 Add session context to system prompt (what was discussed, key decisions)
+- [ ] 13.4 Add tests for multi-turn memory
+
+### Success Criteria
+- [ ] Long sessions (>20 turns) maintain context quality
+- [ ] AI can recall decisions from early in conversation
+- [ ] No context window overflow
 

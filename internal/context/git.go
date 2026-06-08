@@ -9,13 +9,13 @@ import (
 // GitStatus collects a brief git status string for workDir.
 // Returns empty string if workDir is not a git repo or git is unavailable.
 func GitStatus(workDir string) string {
-	branch := runGit(workDir, "branch", "--show-current")
+	branch := runGitCmd(workDir, "branch", "--show-current")
 	if branch == "" {
 		return ""
 	}
 
-	status := runGit(workDir, "status", "--porcelain")
-	log := runGit(workDir, "log", "--oneline", "-n", "5")
+	status := runGitCmd(workDir, "status", "--porcelain")
+	log := runGitCmd(workDir, "log", "--oneline", "-n", "5")
 
 	var sb strings.Builder
 	fmt.Fprintf(&sb, "Current branch: %s\n", branch)
@@ -46,7 +46,7 @@ func GitStatus(workDir string) string {
 	return sb.String()
 }
 
-func runGit(workDir string, args ...string) string {
+func runGitCmd(workDir string, args ...string) string {
 	cmd := exec.Command("git", args...)
 	cmd.Dir = workDir
 	out, err := cmd.Output()

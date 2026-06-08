@@ -113,7 +113,10 @@ func TestRateLimiter_NilSafety(t *testing.T) {
 
 func TestRateLimitMiddleware_Allowed(t *testing.T) {
 	t.Setenv("CLAW_WEB_RATE_RPM", "60")
-	s := NewServer(Config{Addr: "127.0.0.1:0"})
+	s, err := NewServer(Config{Addr: "127.0.0.1:0"})
+	if err != nil {
+		t.Fatal(err)
+	}
 	ts := httptest.NewServer(s.routes())
 	defer ts.Close()
 
@@ -132,7 +135,10 @@ func TestRateLimitMiddleware_Allowed(t *testing.T) {
 
 func TestRateLimitMiddleware_NonChatEndpoint(t *testing.T) {
 	t.Setenv("CLAW_WEB_RATE_RPM", "1") // very restrictive
-	s := NewServer(Config{Addr: "127.0.0.1:0"})
+	s, err := NewServer(Config{Addr: "127.0.0.1:0"})
+	if err != nil {
+		t.Fatal(err)
+	}
 	ts := httptest.NewServer(s.routes())
 	defer ts.Close()
 

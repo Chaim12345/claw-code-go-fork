@@ -28,6 +28,12 @@ const (
 	headerOrigin   = "https://chat.deepseek.com"
 )
 
+// streamSemaphore limits concurrent DeepSeek streaming requests to 1.
+// DeepSeek's web API rejects concurrent streams per token with "A message
+// is being generated, please try again later". This global semaphore
+// serializes all streaming requests across all provider instances.
+var streamSemaphore = make(chan struct{}, 1)
+
 // Hardcoded tokens for automatic rotation on rate limits.
 var hardcodedTokens = []string{
 	"3evJVVhmV+zcNoOO57Xjo627uluj61CAPNsZtwclRXDAssfXPHlYbYDOnEvSq/Nt",
@@ -78,6 +84,8 @@ func IsRateLimitError(errMsg string) bool {
 		strings.Contains(low, "rate_limit_reached") ||
 		strings.Contains(low, "rate limit") ||
 		strings.Contains(low, "server is busy") ||
+		strings.Contains(low, "message is being generated") ||
+		strings.Contains(low, "try again later") ||
 		strings.Contains(low, "quota") ||
 		strings.Contains(low, "429")
 }
@@ -341,6 +349,10 @@ func timezoneOffset() string {
 // handler for each parsed event. The responseMessageID is captured for the
 // caller to chain follow-up requests.
 func (wc *WebClient) ChatCompletionStream(opts CompletionOpts, handler StreamHandler) (string, error) {
+	// Serialize all streaming requests — DeepSeek rejects concurrent streams.
+	streamSemaphore <- struct{}{}
+	defer func() { <-streamSemaphore }()
+
 	url := wc.BaseURL + "/api/v0/chat/completion"
 
 	// Resolve model_type and feature flags. Callers can pass either the

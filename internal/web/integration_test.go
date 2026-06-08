@@ -42,7 +42,10 @@ func TestIntegration_ChatRoundTrip(t *testing.T) {
 	}
 	loop := runtime.NewConversationLoop(cfg, fc)
 
-	srv := NewServer(Config{Addr: "127.0.0.1:0"})
+	srv, err := NewServer(Config{Addr: "127.0.0.1:0"})
+	if err != nil {
+		t.Fatal(err)
+	}
 	srv.ChatLoopFactory = func() *runtime.ConversationLoop {
 		return loop
 	}
@@ -153,7 +156,10 @@ func TestIntegration_SessionIsolation(t *testing.T) {
 		CompactionEnabled: true,
 	}
 
-	srv := NewServer(Config{Addr: "127.0.0.1:0"})
+	srv, err := NewServer(Config{Addr: "127.0.0.1:0"})
+	if err != nil {
+		t.Fatal(err)
+	}
 	srv.ChatLoopFactory = func() *runtime.ConversationLoop {
 		fc := &fakeClient{
 			events: []api.StreamEvent{
@@ -257,7 +263,10 @@ func TestIntegration_Timeout(t *testing.T) {
 
 	loop := runtime.NewConversationLoop(cfg, fc)
 
-	srv := NewServer(Config{Addr: "127.0.0.1:0"})
+	srv, err := NewServer(Config{Addr: "127.0.0.1:0"})
+	if err != nil {
+		t.Fatal(err)
+	}
 	srv.ChatLoopFactory = func() *runtime.ConversationLoop {
 		return loop
 	}
@@ -303,7 +312,10 @@ func TestIntegration_ErrorHandling(t *testing.T) {
 	}
 	loop := runtime.NewConversationLoop(cfg, fc)
 
-	srv := NewServer(Config{Addr: "127.0.0.1:0"})
+	srv, err := NewServer(Config{Addr: "127.0.0.1:0"})
+	if err != nil {
+		t.Fatal(err)
+	}
 	srv.ChatLoopFactory = func() *runtime.ConversationLoop {
 		return loop
 	}

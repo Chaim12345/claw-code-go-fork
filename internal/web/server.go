@@ -16,6 +16,7 @@ import (
 	"crypto/rand"
 	"embed"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -26,6 +27,7 @@ import (
 	"net/url"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -33,6 +35,7 @@ import (
 	"time"
 
 	"claw-code-go/internal/runtime"
+	"claw-code-go/internal/session"
 
 	"github.com/creack/pty"
 	"github.com/gorilla/websocket"
@@ -65,6 +68,10 @@ type Config struct {
 	// Env are extra environment variables for the spawned TUI.
 	// Inherits the parent process env by default.
 	Env []string
+
+	// SessionStoreOverride, if non-nil, is used instead of opening
+	// the default ~/.claw-code/sessions.db. For tests only.
+	SessionStoreOverride *session.Store
 }
 
 // Server is the HTTP+WS server that hosts the web UI.
@@ -82,7 +89,7 @@ type Server struct {
 
 	// chatSessions tracks metadata for chat WS sessions (the /api/chat/ws
 	// path) so the sidebar can show session history.
-	chatSessions *chatSessionStore
+	chatSessions *session.Store
 
 	// metrics holds the Prometheus metrics registry and handler.
 	// Set by NewServer; nil-safe in all instrumentation paths.
@@ -102,27 +109,46 @@ type Server struct {
 }
 
 // NewServer returns a Server ready to listen on cfg.Addr.
-func NewServer(cfg Config) *Server {
+func NewServer(cfg Config) (*Server, error) {
 	if cfg.Addr == "" {
 		cfg.Addr = "127.0.0.1:7777"
 	}
 	if cfg.BinaryPath == "" {
 		cfg.BinaryPath = os.Args[0]
 	}
+
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return nil, fmt.Errorf("home dir: %w", err)
+	}
+
+	var sessionStore *session.Store
+	if cfg.SessionStoreOverride != nil {
+		sessionStore = cfg.SessionStoreOverride
+	} else {
+		dbPath := filepath.Join(homeDir, ".claw-code", "sessions.db")
+		sessionStore, err = session.Open(dbPath)
+		if err != nil {
+			return nil, fmt.Errorf("open session store: %w", err)
+		}
+	}
+
 	return &Server{
 		cfg:          cfg,
 		upgrader:     websocket.Upgrader{CheckOrigin: func(r *http.Request) bool { return true }},
 		rateLimiter:  newRateLimiter(),
-		chatSessions: newChatSessionStore(),
+		chatSessions: sessionStore,
 		metrics:      NewMetrics(),
 		startTime:    time.Now(),
 		sessions:     make(map[*ptySession]struct{}),
-	}
+	}, nil
 }
 
 // ListenAndServe starts the HTTP server. Blocks until ctx is done or
 // the server returns a non-nil error.
 func (s *Server) ListenAndServe(ctx context.Context) error {
+	defer s.chatSessions.Close()
+
 	srv := &http.Server{
 		Addr:              s.cfg.Addr,
 		Handler:           s.routes(),
@@ -162,7 +188,10 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("/terminal", s.handleTerminal)
 	mux.HandleFunc("/ws", s.handleWS)
 	mux.HandleFunc("/api/chat/ws", s.handleChatWS)
-	mux.HandleFunc("/api/sessions", s.chatSessions.handleSessions)
+	mux.HandleFunc("/api/sessions", s.handleSessions)
+	mux.HandleFunc("/api/sessions/search", s.handleSessionsSearch)
+	mux.HandleFunc("/api/sessions/export/", s.handleSessionsExport)
+	mux.HandleFunc("/api/sessions/import", s.handleSessionsImport)
 	mux.HandleFunc("/healthz", s.handleHealthz)
 	mux.HandleFunc("/readyz", s.handleReadyz)
 	// Safe area insets visual test page for mobile development.
@@ -337,14 +366,147 @@ func (s *Server) handleChatWS(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	loop := s.ChatLoopFactory()
+	if loop == nil {
+		http.Error(w, "chat mode: failed to create provider", http.StatusInternalServerError)
+		return
+	}
 	sessionID := newSessionID()
-	s.chatSessions.create(sessionID)
+	s.chatSessions.CreateSession(sessionID, "", "")
 	ctx := r.Context()
 	runChatSession(ctx, conn, loop, sessionID, s.chatSessions, s.metrics)
 	conn.Close()
 }
 
-// ptySession owns a single PTY + child process.
+func (s *Server) handleSessions(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	sessions, err := s.chatSessions.ListSessions()
+	if err != nil {
+		http.Error(w, "failed to list sessions", http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-cache")
+	if err := json.NewEncoder(w).Encode(sessions); err != nil {
+		http.Error(w, "failed to encode response", http.StatusInternalServerError)
+	}
+}
+
+func (s *Server) handleSessionsSearch(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	q := r.URL.Query()
+
+	var results []*session.Session
+	var err error
+
+	if ftsQuery := q.Get("q"); ftsQuery != "" {
+		results, err = s.chatSessions.SearchSessions(ftsQuery)
+	} else {
+		after, _ := time.Parse(time.RFC3339, q.Get("after"))
+		before, _ := time.Parse(time.RFC3339, q.Get("before"))
+		results, err = s.chatSessions.FilterSessions(
+			q.Get("provider"),
+			q.Get("model"),
+			after,
+			before,
+		)
+	}
+
+	if err != nil {
+		slog.Error("session search failed", "error", err)
+		http.Error(w, "search failed", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-cache")
+	if err := json.NewEncoder(w).Encode(results); err != nil {
+		http.Error(w, "failed to encode response", http.StatusInternalServerError)
+	}
+}
+
+func (s *Server) handleSessionsExport(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	id := strings.TrimPrefix(r.URL.Path, "/api/sessions/export/")
+	if id == "" {
+		http.Error(w, "missing session id", http.StatusBadRequest)
+		return
+	}
+
+	format := r.URL.Query().Get("format")
+	switch format {
+	case "json", "":
+		data, err := s.chatSessions.ExportSessionJSON(id)
+		if err != nil {
+			slog.Error("session export json failed", "id", id, "error", err)
+			http.Error(w, "export failed", http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%s.json", id))
+		w.Write(data)
+	case "markdown", "md":
+		md, err := s.chatSessions.ExportSessionMarkdown(id)
+		if err != nil {
+			slog.Error("session export markdown failed", "id", id, "error", err)
+			http.Error(w, "export failed", http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "text/markdown; charset=utf-8")
+		w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%s.md", id))
+		w.Write([]byte(md))
+	default:
+		http.Error(w, "unsupported format (use json or markdown)", http.StatusBadRequest)
+	}
+}
+
+func (s *Server) handleSessionsImport(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	format := r.URL.Query().Get("format")
+	if format == "" {
+		format = "json"
+	}
+
+	body, err := io.ReadAll(io.LimitReader(r.Body, 10<<20))
+	if err != nil {
+		http.Error(w, "failed to read body", http.StatusBadRequest)
+		return
+	}
+
+	var id string
+	switch format {
+	case "json":
+		id, err = s.chatSessions.ImportSessionJSON(body)
+	case "markdown", "md":
+		id, err = s.chatSessions.ImportSessionMarkdown(body)
+	default:
+		http.Error(w, "unsupported format (use json or markdown)", http.StatusBadRequest)
+		return
+	}
+
+	if err != nil {
+		slog.Error("session import failed", "format", format, "error", err)
+		http.Error(w, fmt.Sprintf("import failed: %v", err), http.StatusBadRequest)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	json.NewEncoder(w).Encode(map[string]string{"id": id})
+}
 type ptySession struct {
 	ptmx   *os.File
 	cmd    *exec.Cmd

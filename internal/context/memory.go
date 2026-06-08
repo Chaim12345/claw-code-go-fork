@@ -7,7 +7,7 @@ import (
 	"strings"
 )
 
-const maxMemoryBytes = 20 * 1024 // 20KB
+const maxMemoryBytes = 40 * 1024 // 40KB
 
 // LoadMemoryFiles discovers and loads CLAUDE.md files, returning concatenated content.
 // Searches: ~/.claude/CLAUDE.md, <workDir>/CLAUDE.md, <workDir>/.claude/CLAUDE.md

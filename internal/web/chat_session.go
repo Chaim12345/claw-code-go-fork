@@ -2,6 +2,7 @@ package web
 
 import (
 	"claw-code-go/internal/runtime"
+	"claw-code-go/internal/session"
 	"claw-code-go/internal/web/chatproto"
 	"context"
 	"encoding/json"
@@ -26,7 +27,7 @@ import (
 //
 // The function returns when either the websocket closes or ctx is
 // cancelled. The caller should close the websocket after this returns.
-func runChatSession(ctx context.Context, conn *websocket.Conn, loop *runtime.ConversationLoop, sessionID string, store *chatSessionStore, m *Metrics) {
+func runChatSession(ctx context.Context, conn *websocket.Conn, loop *runtime.ConversationLoop, sessionID string, store *session.Store, m *Metrics) {
 	logger := LoggerFromCtx(ctx).With(slog.String("session_id", sessionID))
 	logger.Info("chat_session_started")
 
@@ -93,7 +94,14 @@ func runChatSession(ctx context.Context, conn *websocket.Conn, loop *runtime.Con
 			writeMu.Unlock()
 			// Record assistant replies for sidebar history.
 			if store != nil && ev.Type == runtime.TurnEventTextFinal && ev.Text != "" {
-				store.recordAssistantReply(sessionID, ev.Text)
+				if _, err := store.RecordMessage(sessionID, "assistant", ev.Text, 0); err != nil {
+					logger.Warn("record_assistant_reply_failed", "error", err)
+				} else {
+					lastMsg := truncateText(ev.Text, 120)
+					var msgCount int
+					_ = store.DB.QueryRow("SELECT message_count FROM sessions WHERE id = ?", sessionID).Scan(&msgCount)
+					_ = store.UpdateSessionPreview(sessionID, "", lastMsg, msgCount)
+				}
 			}
 			// Count the assistant message in metrics.
 			if m != nil && ev.Type == runtime.TurnEventTextFinal {
@@ -153,7 +161,14 @@ func runChatSession(ctx context.Context, conn *websocket.Conn, loop *runtime.Con
 			}
 			// Record the user message in the session store for sidebar history.
 			if store != nil {
-				store.recordUserMessage(sessionID, msg.Text)
+				if _, err := store.RecordMessage(sessionID, "user", msg.Text, 0); err != nil {
+					logger.Warn("record_user_message_failed", "error", err)
+				} else {
+					firstMsg := truncateText(msg.Text, 80)
+					var msgCount int
+					_ = store.DB.QueryRow("SELECT COUNT(*) FROM messages WHERE session_id = ? AND role = 'user'", sessionID).Scan(&msgCount)
+					_ = store.UpdateSessionPreview(sessionID, firstMsg, "", msgCount)
+				}
 			}
 			// Count the user message in metrics.
 			if m != nil {

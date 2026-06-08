@@ -1,0 +1,165 @@
+package tools
+
+import (
+	"bytes"
+	"claw-code-go/internal/api"
+	"context"
+	"fmt"
+	"os"
+	"os/exec"
+	"regexp"
+	"strings"
+	"time"
+)
+
+const (
+	bashTimeout   = 30 * time.Second
+	maxOutputSize = 10000
+)
+
+// BashTool returns the tool definition for the bash tool.
+func BashTool() api.Tool {
+	return api.Tool{
+		Name:        "bash",
+		Description: "Execute a bash command and return the output. Use this for running shell commands, scripts, and system operations.",
+		InputSchema: api.InputSchema{
+			Type: "object",
+			Properties: map[string]api.Property{
+				"command": {
+					Type:        "string",
+					Description: "The bash command to execute",
+				},
+			},
+			Required: []string{"command"},
+		},
+	}
+}
+
+// ExecuteBash runs a bash command and returns combined stdout+stderr.
+// All commands are logged for audit and checked against blocked patterns
+// to prevent dangerous operations.
+func ExecuteBash(input map[string]any) (string, error) {
+	command, ok := input["command"].(string)
+	if !ok || command == "" {
+		return "", fmt.Errorf("bash: 'command' input is required and must be a string")
+	}
+
+	// Security: Check for blocked command patterns.
+	if err := checkBlockedPattern(command); err != nil {
+		return "", err
+	}
+
+	// Security: Log execution for audit trail.
+	logBashExecution(command)
+
+	ctx, cancel := context.WithTimeout(context.Background(), bashTimeout)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, "bash", "-c", command)
+
+	var buf bytes.Buffer
+	cmd.Stdout = &buf
+	cmd.Stderr = &buf
+
+	err := cmd.Run()
+
+	output := buf.String()
+
+	// Truncate output if too long
+	if len(output) > maxOutputSize {
+		output = output[:maxOutputSize] + "\n... [output truncated]"
+	}
+
+	if err != nil {
+		// Return output + error description; the caller decides if it's a hard error
+		if ctx.Err() == context.DeadlineExceeded {
+			return output, fmt.Errorf("command timed out after %s", bashTimeout)
+		}
+		// For non-zero exit codes, return output with error appended
+		return output, fmt.Errorf("command exited with error: %v", err)
+	}
+
+	return output, nil
+}
+
+// blockedPatterns contains dangerous command patterns that are never allowed.
+var blockedPatterns = []string{
+	"rm -rf",
+	"rm -r",
+	"rm -fr",
+	"rm --recursive",
+	"rm --force",
+	"dd if=",
+	"dd  if=",
+	"mkfs.",
+	"mkfs ",
+	"> /dev/sda",
+	">/dev/sda",
+	":(){ :|:& };:",
+	"chmod 777 /",
+	"chmod -R 777",
+	"chown -R",
+	"kill -9",
+	"reboot",
+	"shutdown",
+	"halt",
+	"poweroff",
+	"wget .* -O /dev/",
+	"curl .* /dev/",
+	"ufw disable",
+	"iptables -F",
+	"iptables --flush",
+	"systemctl stop",
+	"systemctl disable",
+}
+
+// checkBlockedPattern validates that a bash command does not contain
+// dangerous patterns. Returns an error if a blocked pattern is found.
+func checkBlockedPattern(command string) error {
+	lower := strings.ToLower(command)
+	for _, pattern := range blockedPatterns {
+		if strings.Contains(lower, strings.ToLower(pattern)) {
+			return fmt.Errorf("bash: command blocked for safety: matched dangerous pattern %q", pattern)
+		}
+	}
+	return nil
+}
+
+// secretPatterns are regex patterns that match common secret/credential
+// formats in shell commands. Matched values are replaced with [REDACTED]
+// before audit logging to prevent credential leakage to stderr.
+var secretPatterns = []*regexp.Regexp{
+	regexp.MustCompile(`(?i)(api[_-]?key|token|secret|password|passwd|auth)\s*[=:]\s*\S+`),
+	regexp.MustCompile(`(?i)export\s+(API_KEY|TOKEN|SECRET|PASSWORD|PASSWD|AUTH)\s*=\s*\S+`),
+	regexp.MustCompile(`(?i)sk-[a-zA-Z0-9]{20,}`),
+	regexp.MustCompile(`(?i)Bearer\s+\S+`),
+	regexp.MustCompile(`(?i)-H\s*['"]\s*Authorization:\s*\S+`),
+	regexp.MustCompile(`(?i)curl\s+.*-u\s+\S+:\S+`),
+}
+
+// redactSecrets replaces common secret patterns in cmd with [REDACTED].
+func redactSecrets(cmd string) string {
+	for _, re := range secretPatterns {
+		cmd = re.ReplaceAllString(cmd, "$1=[REDACTED]")
+	}
+	// Second pass: catch any remaining patterns after first-pass replacements.
+	reAny := regexp.MustCompile(`(?i)(api[_-]?key|token|secret|password|passwd|auth)\s*[=:]\s*\S+`)
+	cmd = reAny.ReplaceAllString(cmd, "$1=[REDACTED]")
+	return cmd
+}
+
+// bashAuditLogger is pluggable for testing. Set to a custom function
+// in tests to capture audit output.
+var bashAuditLogger = defaultBashAuditLog
+
+func logBashExecution(command string) { bashAuditLogger(command) }
+
+func defaultBashAuditLog(command string) {
+	safe := redactSecrets(command)
+	if safe != command {
+		fmt.Fprintf(os.Stderr, "[audit] bash: %s\n", safe)
+		fmt.Fprintf(os.Stderr, "[audit]   (secrets redacted from log)\n")
+	} else {
+		fmt.Fprintf(os.Stderr, "[audit] bash: %s\n", safe)
+	}
+}
