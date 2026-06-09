@@ -5,6 +5,7 @@ import (
 	clawctx "claw-code-go/internal/context"
 	"claw-code-go/internal/mcp"
 	"claw-code-go/internal/permissions"
+	"claw-code-go/internal/session"
 	"claw-code-go/internal/tools"
 	"claw-code-go/internal/usage"
 	"context"
@@ -47,7 +48,9 @@ type ConversationLoop struct {
 	MCPRegistry  *mcp.Registry      // MCP server registry (may be nil)
 	Compaction   CompactionState    // Phase 6 token tracking and compaction state
 	CtxAssembler *clawctx.Assembler // Phase 12 context assembler (may be nil)
-	Usage        *usage.Tracker     // Phase 13 per-session token usage tracker
+	Usage *usage.Tracker // Phase 13 per-session token usage tracker
+	SessionStore session.SessionStore
+	CurrentSessionID string
 
 	// lastStopReason is the stop_reason reported by the most recent
 	// streaming turn ("end_turn", "tool_use", "max_tokens", …). Set
@@ -74,6 +77,7 @@ func NewConversationLoop(cfg *Config, client api.APIClient) *ConversationLoop {
 			tools.WebSearchTool(),
 			tools.AskUserQuestionTool(),
 			tools.TodoWriteTool(),
+		tools.NoteWriteTool(),
 		},
 		Permissions:  DefaultPermissions(),
 		Config:       cfg,
@@ -1003,8 +1007,9 @@ func (loop *ConversationLoop) ExecuteToolQuiet(name string, input map[string]any
 		}
 	case "todo_write":
 		result, err = tools.ExecuteTodoWrite(input)
+	case "note_write":
+		result, err = loop.executeNoteWrite(input)
 	default:
-		// Fall back to MCP registry.
 		if loop.MCPRegistry != nil {
 			if client, _, ok := loop.MCPRegistry.FindTool(name); ok {
 				mcpResult, mcpErr := client.CallTool(context.Background(), name, input)
@@ -1036,6 +1041,40 @@ func (loop *ConversationLoop) ExecuteToolQuiet(name string, input map[string]any
 		Type:    "tool_result",
 		Content: []api.ContentBlock{{Type: "text", Text: text}},
 		IsError: isError,
+	}
+}
+
+func (loop *ConversationLoop) executeNoteWrite(input map[string]any) (string, error) {
+	action, _ := input["action"].(string)
+	switch action {
+	case "read":
+		if loop.SessionStore == nil || loop.CurrentSessionID == "" {
+			return "[]", nil
+		}
+		notes, err := loop.SessionStore.GetSessionNotes(loop.CurrentSessionID)
+		if err != nil {
+			return "", fmt.Errorf("note_write: read: %w", err)
+		}
+		if len(notes) == 0 {
+			return "[]", nil
+		}
+		out, _ := json.MarshalIndent(notes, "", "  ")
+		return string(out), nil
+	case "write":
+		key, _ := input["key"].(string)
+		content, _ := input["content"].(string)
+		if content == "" {
+			return "", fmt.Errorf("note_write: 'content' is required for action=write")
+		}
+		if loop.SessionStore == nil || loop.CurrentSessionID == "" {
+			return "", fmt.Errorf("note_write: no active session")
+		}
+		if err := loop.SessionStore.SaveSessionNote(loop.CurrentSessionID, key, content); err != nil {
+			return "", fmt.Errorf("note_write: save: %w", err)
+		}
+		return "note saved", nil
+	default:
+		return "", fmt.Errorf("note_write: unknown action %q (use read or write)", action)
 	}
 }
 
@@ -1163,8 +1202,9 @@ func (loop *ConversationLoop) ExecuteTool(name string, input map[string]any) api
 		}
 	case "todo_write":
 		result, err = tools.ExecuteTodoWrite(input)
+	case "note_write":
+		result, err = loop.executeNoteWrite(input)
 	default:
-		// Fall back to MCP registry.
 		if loop.MCPRegistry != nil {
 			if client, _, ok := loop.MCPRegistry.FindTool(name); ok {
 				mcpResult, mcpErr := client.CallTool(context.Background(), name, input)

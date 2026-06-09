@@ -82,6 +82,19 @@ type SessionStore interface {
 	// and returns the new session id.
 	ImportSessionMarkdown(data []byte) (string, error)
 
+	// ── Notes ─────────────────────────────────────────────────
+
+	// SaveSessionNote upserts a note for the given session+key.
+	// If a note with the same session_id+key exists, its content and
+	// updated_at are overwritten. Otherwise a new row is inserted.
+	SaveSessionNote(sessionID, key, content string) error
+
+	// GetSessionNotes returns all notes for a session, ordered by key.
+	GetSessionNotes(sessionID string) ([]*Note, error)
+
+	// DeleteSessionNote removes a single note by its id.
+	DeleteSessionNote(id int64) error
+
 	// ── Lifecycle ──────────────────────────────────────────────
 
 	// Close releases the underlying database handle.

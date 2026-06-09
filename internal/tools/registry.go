@@ -30,6 +30,8 @@ func Schema(name string) (api.InputSchema, bool) {
 		return AskUserQuestionTool().InputSchema, true
 	case "todo_write":
 		return TodoWriteTool().InputSchema, true
+	case "note_write":
+		return NoteWriteTool().InputSchema, true
 	case "pty_run":
 		return PTYRunTool().InputSchema, true
 	}

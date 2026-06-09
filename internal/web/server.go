@@ -35,6 +35,7 @@ import (
 	"time"
 
 	"claw-code-go/internal/runtime"
+	"claw-code-go/internal/search"
 	"claw-code-go/internal/session"
 
 	"github.com/creack/pty"
@@ -192,6 +193,9 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("/api/sessions/search", s.handleSessionsSearch)
 	mux.HandleFunc("/api/sessions/export/", s.handleSessionsExport)
 	mux.HandleFunc("/api/sessions/import", s.handleSessionsImport)
+	mux.HandleFunc("/api/sessions/notes", s.handleSessionNotes)
+	mux.HandleFunc("/api/sessions/notes/", s.handleSessionNoteDelete)
+	mux.HandleFunc("/api/codebase/search", s.handleCodebaseSearch)
 	mux.HandleFunc("/healthz", s.handleHealthz)
 	mux.HandleFunc("/readyz", s.handleReadyz)
 	// Safe area insets visual test page for mobile development.
@@ -375,6 +379,11 @@ func (s *Server) handleChatWS(w http.ResponseWriter, r *http.Request) {
 	}
 	sessionID := newSessionID()
 	s.chatSessions.CreateSession(sessionID, "", "")
+	if loop.CtxAssembler != nil {
+		loop.CtxAssembler.CurrentSessionID = sessionID
+	}
+	loop.SessionStore = s.chatSessions
+	loop.CurrentSessionID = sessionID
 	ctx := r.Context()
 	runChatSession(ctx, conn, loop, sessionID, s.chatSessions, s.metrics)
 	conn.Close()
@@ -427,6 +436,39 @@ func (s *Server) handleSessionsSearch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-cache")
+	if err := json.NewEncoder(w).Encode(results); err != nil {
+		http.Error(w, "failed to encode response", http.StatusInternalServerError)
+	}
+}
+
+func (s *Server) handleCodebaseSearch(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	q := r.URL.Query().Get("q")
+	if q == "" {
+		http.Error(w, "missing query parameter 'q'", http.StatusBadRequest)
+		return
+	}
+	limit := 10
+	if l := r.URL.Query().Get("limit"); l != "" {
+		if n, err := strconv.Atoi(l); err == nil && n > 0 && n <= 50 {
+			limit = n
+		}
+	}
+	dir := s.cfg.Workdir
+	if dir == "" {
+		dir, _ = os.Getwd()
+	}
+	results, err := search.SearchCodebase(dir, q, limit)
+	if err != nil {
+		slog.Error("codebase search failed", "error", err)
+		http.Error(w, "search failed", http.StatusInternalServerError)
+		return
+	}
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-cache")
 	if err := json.NewEncoder(w).Encode(results); err != nil {
@@ -510,6 +552,69 @@ func (s *Server) handleSessionsImport(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	json.NewEncoder(w).Encode(map[string]string{"id": id})
 }
+
+func (s *Server) handleSessionNotes(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodGet:
+		sessionID := r.URL.Query().Get("session_id")
+		if sessionID == "" {
+			http.Error(w, "missing session_id query parameter", http.StatusBadRequest)
+			return
+		}
+		notes, err := s.chatSessions.GetSessionNotes(sessionID)
+		if err != nil {
+			slog.Error("get session notes failed", "session_id", sessionID, "error", err)
+			http.Error(w, "failed to get notes", http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		json.NewEncoder(w).Encode(notes)
+
+	case http.MethodPost:
+		var req struct {
+			SessionID string `json:"session_id"`
+			Key       string `json:"key"`
+			Content   string `json:"content"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, "invalid JSON body", http.StatusBadRequest)
+			return
+		}
+		if req.SessionID == "" || req.Content == "" {
+			http.Error(w, "session_id and content are required", http.StatusBadRequest)
+			return
+		}
+		if err := s.chatSessions.SaveSessionNote(req.SessionID, req.Key, req.Content); err != nil {
+			slog.Error("save session note failed", "session_id", req.SessionID, "error", err)
+			http.Error(w, "failed to save note", http.StatusInternalServerError)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+
+	default:
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+func (s *Server) handleSessionNoteDelete(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodDelete {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	idStr := strings.TrimPrefix(r.URL.Path, "/api/sessions/notes/")
+	id, err := strconv.ParseInt(idStr, 10, 64)
+	if err != nil || id <= 0 {
+		http.Error(w, "invalid note id", http.StatusBadRequest)
+		return
+	}
+	if err := s.chatSessions.DeleteSessionNote(id); err != nil {
+		slog.Error("delete session note failed", "id", id, "error", err)
+		http.Error(w, "failed to delete note", http.StatusInternalServerError)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
 type ptySession struct {
 	ptmx   *os.File
 	cmd    *exec.Cmd

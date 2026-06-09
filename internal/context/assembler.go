@@ -14,8 +14,9 @@ import (
 // Each section (system info, git, memory, project map, recent sessions) is assigned
 // a portion of the overall token budget so no single piece dominates the context window.
 type Assembler struct {
-	WorkDir      string
-	SessionStore session.SessionStore // optional; nil skips the Recent Sessions section
+	WorkDir         string
+	SessionStore    session.SessionStore
+	CurrentSessionID string
 
 	mu        sync.Mutex
 	memCache  string
@@ -64,6 +65,13 @@ func (a *Assembler) Assemble() string {
 		if sh := a.buildSessionHistorySection(2000); sh != "" {
 			sections = append(sections, sh)
 			tokenBudget -= estimateTokens(sh)
+		}
+	}
+
+	if a.SessionStore != nil && a.CurrentSessionID != "" && tokenBudget > 200 {
+		if sn := a.buildSessionNotesSection(500); sn != "" {
+			sections = append(sections, sn)
+			tokenBudget -= estimateTokens(sn)
 		}
 	}
 
@@ -148,6 +156,26 @@ func (a *Assembler) buildSessionHistorySection(maxTokens int) string {
 	}
 
 	text := "# Recent Sessions\n\n" + strings.Join(lines, "\n")
+	return deepseek.FitToBudget(text, maxTokens)
+}
+
+func (a *Assembler) buildSessionNotesSection(maxTokens int) string {
+	if a.SessionStore == nil || a.CurrentSessionID == "" {
+		return ""
+	}
+	notes, err := a.SessionStore.GetSessionNotes(a.CurrentSessionID)
+	if err != nil || len(notes) == 0 {
+		return ""
+	}
+	var lines []string
+	for _, n := range notes {
+		if n.Key != "" {
+			lines = append(lines, fmt.Sprintf("- **%s**: %s", n.Key, n.Content))
+		} else {
+			lines = append(lines, fmt.Sprintf("- %s", n.Content))
+		}
+	}
+	text := "# Session Notes\n\n" + strings.Join(lines, "\n")
 	return deepseek.FitToBudget(text, maxTokens)
 }
 

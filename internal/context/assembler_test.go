@@ -17,13 +17,9 @@ func TestAssembler_Assemble_NotEmpty(t *testing.T) {
 }
 
 func TestAssembler_TokenBudget(t *testing.T) {
-	// The assembler uses a 12K token budget with estimateTokens = len(s)/4.
-	// The soft prompt limit is 28K (set in config). 12K is well within limits.
 	a := NewAssembler(".")
 	result := a.Assemble()
 	estimatedTokens := len(result) / 4
-
-	// Budget is 12K in assembler code, soft limit is 28K
 	if estimatedTokens > 28000 {
 		t.Errorf("token budget exceeded: estimated %d tokens (soft limit 28K)", estimatedTokens)
 	}
@@ -58,7 +54,6 @@ func TestAssembler_Latency(t *testing.T) {
 func TestAssembler_IncludesEnvironment(t *testing.T) {
 	a := NewAssembler(".")
 	result := a.Assemble()
-	// Should include environment info, git status, and project structure
 	hasEnv := containsSubstring(result, "Environment")
 	hasGit := containsSubstring(result, "Git Status")
 	hasProject := containsSubstring(result, "Project Structure")
@@ -72,7 +67,6 @@ func TestAssembler_IncludesEnvironment(t *testing.T) {
 	if !hasGit {
 		t.Error("missing Git Status section")
 	}
-	// Project structure may be truncated if token budget is tight
 	if !hasProject {
 		t.Log("NOTE: Project Structure section not found (may be truncated by budget)")
 	}
@@ -83,9 +77,7 @@ func TestAssembler_IncludesEnvironment(t *testing.T) {
 
 func TestAssembler_CacheHit(t *testing.T) {
 	a := NewAssembler(".")
-	// First call builds cache
 	_ = a.Assemble()
-	// Second call should use cache
 	start := time.Now()
 	for i := 0; i < 10; i++ {
 		a.Assemble()
@@ -93,7 +85,6 @@ func TestAssembler_CacheHit(t *testing.T) {
 	elapsed := time.Since(start)
 	avg := elapsed / 10
 	t.Logf("cached assembly time: %v", avg)
-	// Cached should be fast (<250ms even with I/O)
 	if avg > 250*time.Millisecond {
 		t.Errorf("cached assembly too slow: %v", avg)
 	}
@@ -119,9 +110,12 @@ func truncateString(s string, maxLen int) string {
 	return s[:maxLen] + "..."
 }
 
+// ── Mock store ─────────────────────────────────────────────
+
 type mockStore struct {
-	sessions  []*session.Session
+	sessions []*session.Session
 	summaries map[string]string
+	notes    []*session.Note
 }
 
 func (m *mockStore) GetRecentSessions(limit int) ([]*session.Session, error) {
@@ -133,24 +127,35 @@ func (m *mockStore) GetRecentSessions(limit int) ([]*session.Session, error) {
 func (m *mockStore) GetSessionSummary(id string) (string, error) {
 	return m.summaries[id], nil
 }
-func (m *mockStore) CreateSession(_, _, _ string) error               { return nil }
-func (m *mockStore) GetSession(_ string) (*session.Session, error)    { return nil, nil }
-func (m *mockStore) ListSessions() ([]*session.Session, error)        { return m.sessions, nil }
-func (m *mockStore) SearchSessions(_ string) ([]*session.Session, error) { return nil, nil }
+func (m *mockStore) CreateSession(_, _, _ string) error                        { return nil }
+func (m *mockStore) GetSession(_ string) (*session.Session, error)             { return nil, nil }
+func (m *mockStore) ListSessions() ([]*session.Session, error)                 { return m.sessions, nil }
+func (m *mockStore) SearchSessions(_ string) ([]*session.Session, error)       { return nil, nil }
 func (m *mockStore) FilterSessions(_, _ string, _, _ time.Time) ([]*session.Session, error) {
 	return nil, nil
 }
-func (m *mockStore) DeleteSession(_ string) error                          { return nil }
-func (m *mockStore) UpdateSessionPreview(_, _, _ string, _ int) error      { return nil }
-func (m *mockStore) RecordMessage(_, _, _ string, _ int) (int64, error)    { return 0, nil }
-func (m *mockStore) GetMessages(_ string) ([]*session.Message, error)      { return nil, nil }
-func (m *mockStore) RecordToolCall(_ int64, _, _, _ string, _ int) error   { return nil }
-func (m *mockStore) GetToolCalls(_ int64) ([]*session.ToolCall, error)     { return nil, nil }
-func (m *mockStore) ExportSessionMarkdown(_ string) (string, error)        { return "", nil }
-func (m *mockStore) ExportSessionJSON(_ string) ([]byte, error)            { return nil, nil }
-func (m *mockStore) ImportSessionJSON(_ []byte) (string, error)           { return "", nil }
-func (m *mockStore) ImportSessionMarkdown(_ []byte) (string, error)        { return "", nil }
-func (m *mockStore) Close() error                                          { return nil }
+func (m *mockStore) DeleteSession(_ string) error                                          { return nil }
+func (m *mockStore) UpdateSessionPreview(_, _, _ string, _ int) error                      { return nil }
+func (m *mockStore) RecordMessage(_, _, _ string, _ int) (int64, error)                    { return 0, nil }
+func (m *mockStore) GetMessages(_ string) ([]*session.Message, error)                      { return nil, nil }
+func (m *mockStore) RecordToolCall(_ int64, _, _, _ string, _ int) error                   { return nil }
+func (m *mockStore) GetToolCalls(_ int64) ([]*session.ToolCall, error)                     { return nil, nil }
+func (m *mockStore) ExportSessionMarkdown(_ string) (string, error)                        { return "", nil }
+func (m *mockStore) ExportSessionJSON(_ string) ([]byte, error)                            { return nil, nil }
+func (m *mockStore) ImportSessionJSON(_ []byte) (string, error)                            { return "", nil }
+func (m *mockStore) ImportSessionMarkdown(_ []byte) (string, error)                        { return "", nil }
+func (m *mockStore) SaveSessionNote(_ string, _ string, _ string) error                    { return nil }
+func (m *mockStore) DeleteSessionNote(_ int64) error                                       { return nil }
+func (m *mockStore) Close() error                                                          { return nil }
+
+func (m *mockStore) GetSessionNotes(sessionID string) ([]*session.Note, error) {
+	if m.notes == nil {
+		return []*session.Note{}, nil
+	}
+	return m.notes, nil
+}
+
+// ── Session history tests ──────────────────────────────────
 
 func TestAssembler_SessionHistory_NilStore(t *testing.T) {
 	a := NewAssembler(".")
@@ -227,5 +232,76 @@ func TestAssembler_SessionHistory_BudgetCapped(t *testing.T) {
 	estimatedTokens := len(result) / 4
 	if estimatedTokens > 2200 {
 		t.Errorf("session history section exceeded budget: ~%d tokens (limit 2000)", estimatedTokens)
+	}
+}
+
+// ── Session notes tests ────────────────────────────────────
+
+func TestAssembler_SessionNotes_NilStore(t *testing.T) {
+	a := NewAssembler(".")
+	a.CurrentSessionID = "s1"
+	result := a.buildSessionNotesSection(500)
+	if result != "" {
+		t.Errorf("expected empty notes section with nil store, got %q", result)
+	}
+}
+
+func TestAssembler_SessionNotes_EmptySessionID(t *testing.T) {
+	store := &mockStore{}
+	a := NewAssembler(".")
+	a.SetSessionStore(store)
+	result := a.buildSessionNotesSection(500)
+	if result != "" {
+		t.Errorf("expected empty notes section with empty session ID, got %q", result)
+	}
+}
+
+func TestAssembler_SessionNotes_WithNotes(t *testing.T) {
+	store := &mockStore{
+		notes: []*session.Note{
+			{ID: 1, SessionID: "s1", Key: "pref", Content: "tabs not spaces"},
+			{ID: 2, SessionID: "s1", Key: "style", Content: "terse replies"},
+		},
+	}
+	a := NewAssembler(".")
+	a.SetSessionStore(store)
+	a.CurrentSessionID = "s1"
+	result := a.buildSessionNotesSection(500)
+	if !strings.Contains(result, "# Session Notes") {
+		t.Errorf("expected Session Notes header, got %q", result)
+	}
+	if !strings.Contains(result, "pref") || !strings.Contains(result, "tabs not spaces") {
+		t.Errorf("expected note content in section, got %q", result)
+	}
+	if !strings.Contains(result, "style") || !strings.Contains(result, "terse replies") {
+		t.Errorf("expected second note content in section, got %q", result)
+	}
+}
+
+func TestAssembler_SessionNotes_NoNotes(t *testing.T) {
+	store := &mockStore{}
+	a := NewAssembler(".")
+	a.SetSessionStore(store)
+	a.CurrentSessionID = "s1"
+	result := a.buildSessionNotesSection(500)
+	if result != "" {
+		t.Errorf("expected empty section when no notes exist, got %q", result)
+	}
+}
+
+func TestAssembler_SessionNotes_BudgetCapped(t *testing.T) {
+	longContent := strings.Repeat("z", 10000)
+	store := &mockStore{
+		notes: []*session.Note{
+			{ID: 1, SessionID: "s1", Key: "big", Content: longContent},
+		},
+	}
+	a := NewAssembler(".")
+	a.SetSessionStore(store)
+	a.CurrentSessionID = "s1"
+	result := a.buildSessionNotesSection(500)
+	estimatedTokens := len(result) / 4
+	if estimatedTokens > 600 { // 500 + 20% overhead
+		t.Errorf("notes section exceeded budget: ~%d tokens (limit 500)", estimatedTokens)
 	}
 }

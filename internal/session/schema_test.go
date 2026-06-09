@@ -25,7 +25,7 @@ func TestSchemaCreation(t *testing.T) {
 	store := openTemp(t)
 
 	// Verify all three tables exist.
-	tables := []string{"sessions", "messages", "tool_calls", "schema_version"}
+	tables := []string{"sessions", "messages", "tool_calls", "session_notes", "schema_version"}
 	for _, name := range tables {
 		var count int
 		err := store.DB.QueryRow(
@@ -284,12 +284,121 @@ func TestOpenCreatesDir(t *testing.T) {
 // TestOpenNonExistentDir verifies that Open returns an error when the
 // parent directory cannot be created (e.g. permissions).
 func TestOpenNonExistentDir(t *testing.T) {
-	// This is a best-effort test: if we're running as root it won't fail.
-	// We just verify Open doesn't panic.
-	_ = t.TempDir() // ensure clean state
+	_ = t.TempDir()
 }
 
-// Ensure the sql driver is imported so tests don't fail with
-// "no driver registered". The import happens in the main file or a
-// blank-import file; this comment is just documentation.
+func TestSaveAndGetNotes(t *testing.T) {
+	store := openTemp(t)
+	if err := store.CreateSession("s1", "test", "model"); err != nil {
+		t.Fatalf("CreateSession: %v", err)
+	}
+	if err := store.SaveSessionNote("s1", "pref", "user prefers tabs over spaces"); err != nil {
+		t.Fatalf("SaveSessionNote: %v", err)
+	}
+	notes, err := store.GetSessionNotes("s1")
+	if err != nil {
+		t.Fatalf("GetSessionNotes: %v", err)
+	}
+	if len(notes) != 1 {
+		t.Fatalf("expected 1 note, got %d", len(notes))
+	}
+	if notes[0].Key != "pref" || notes[0].Content != "user prefers tabs over spaces" {
+		t.Errorf("note content mismatch: key=%q content=%q", notes[0].Key, notes[0].Content)
+	}
+}
+
+func TestSaveSessionNote_Upsert(t *testing.T) {
+	store := openTemp(t)
+	if err := store.CreateSession("s1", "test", "model"); err != nil {
+		t.Fatalf("CreateSession: %v", err)
+	}
+	if err := store.SaveSessionNote("s1", "pref", "old value"); err != nil {
+		t.Fatalf("first save: %v", err)
+	}
+	if err := store.SaveSessionNote("s1", "pref", "new value"); err != nil {
+		t.Fatalf("upsert save: %v", err)
+	}
+	notes, _ := store.GetSessionNotes("s1")
+	if len(notes) != 1 {
+		t.Fatalf("expected 1 note after upsert, got %d", len(notes))
+	}
+	if notes[0].Content != "new value" {
+		t.Errorf("expected 'new value', got %q", notes[0].Content)
+	}
+}
+
+func TestGetSessionNotes_Empty(t *testing.T) {
+	store := openTemp(t)
+	if err := store.CreateSession("s1", "test", "model"); err != nil {
+		t.Fatalf("CreateSession: %v", err)
+	}
+	notes, err := store.GetSessionNotes("s1")
+	if err != nil {
+		t.Fatalf("GetSessionNotes: %v", err)
+	}
+	if len(notes) != 0 {
+		t.Errorf("expected 0 notes, got %d", len(notes))
+	}
+}
+
+func TestDeleteSessionNote(t *testing.T) {
+	store := openTemp(t)
+	if err := store.CreateSession("s1", "test", "model"); err != nil {
+		t.Fatalf("CreateSession: %v", err)
+	}
+	if err := store.SaveSessionNote("s1", "a", "note a"); err != nil {
+		t.Fatalf("save a: %v", err)
+	}
+	if err := store.SaveSessionNote("s1", "b", "note b"); err != nil {
+		t.Fatalf("save b: %v", err)
+	}
+	notes, _ := store.GetSessionNotes("s1")
+	if len(notes) != 2 {
+		t.Fatalf("expected 2 notes, got %d", len(notes))
+	}
+	if err := store.DeleteSessionNote(notes[0].ID); err != nil {
+		t.Fatalf("DeleteSessionNote: %v", err)
+	}
+	notes, _ = store.GetSessionNotes("s1")
+	if len(notes) != 1 {
+		t.Errorf("expected 1 note after delete, got %d", len(notes))
+	}
+}
+
+func TestSessionNotes_CascadeOnDeleteSession(t *testing.T) {
+	store := openTemp(t)
+	if err := store.CreateSession("s1", "test", "model"); err != nil {
+		t.Fatalf("CreateSession: %v", err)
+	}
+	if err := store.SaveSessionNote("s1", "x", "note x"); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+	if err := store.DeleteSession("s1"); err != nil {
+		t.Fatalf("DeleteSession: %v", err)
+	}
+	notes, err := store.GetSessionNotes("s1")
+	if err != nil {
+		t.Fatalf("GetSessionNotes after cascade: %v", err)
+	}
+	if len(notes) != 0 {
+		t.Errorf("expected 0 notes after session delete (cascade), got %d", len(notes))
+	}
+}
+
+func TestSessionNotes_OrderedByKey(t *testing.T) {
+	store := openTemp(t)
+	if err := store.CreateSession("s1", "test", "model"); err != nil {
+		t.Fatalf("CreateSession: %v", err)
+	}
+	store.SaveSessionNote("s1", "c", "third")
+	store.SaveSessionNote("s1", "a", "first")
+	store.SaveSessionNote("s1", "b", "second")
+	notes, _ := store.GetSessionNotes("s1")
+	if len(notes) != 3 {
+		t.Fatalf("expected 3 notes, got %d", len(notes))
+	}
+	if notes[0].Key != "a" || notes[1].Key != "b" || notes[2].Key != "c" {
+		t.Errorf("notes not ordered by key: %s %s %s", notes[0].Key, notes[1].Key, notes[2].Key)
+	}
+}
 var _ = sql.Drivers

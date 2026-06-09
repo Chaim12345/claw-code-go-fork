@@ -546,16 +546,17 @@ Add semantic search over the codebase so the AI can find relevant code without r
 
 ### Tasks
 
-- [ ] 12.1 Add BM25/TF-IDF index for Go files (stdlib only)
-- [ ] 12.2 Add `SearchCodebase(query string, limit int) ([]SearchResult, error)` function
-- [ ] 12.3 Add `/api/search` HTTP endpoint
-- [ ] 14.4 Update context assembler to include top search results for user query
-- [ ] 12.5 Add tests for codebase search
+- [x] 12.1 Add BM25/TF-IDF index for Go files (stdlib only)
+- [x] 12.2 Add `SearchCodebase(query string, limit int) ([]SearchResult, error)` function
+- [x] 12.3 Add `/api/search` HTTP endpoint
+- [x] 12.4 Update context assembler to include top search results for user query
+- [x] 12.5 Add tests for codebase search
 
 ### Success Criteria
-- [ ] AI can find relevant code snippets by semantic query
-- [ ] Search completes in <100ms for typical codebase
-- [ ] No false positives on unrelated files
+
+- [x] AI can find relevant code snippets by semantic query
+- [x] Search completes in <100ms for typical codebase
+- [x] No false positives on unrelated files
 
 ---
 
@@ -565,14 +566,14 @@ Add semantic search over the codebase so the AI can find relevant code without r
 Improve multi-turn conversation quality by maintaining better context across turns.
 
 ### Tasks
-
-- [ ] 13.1 Add automatic context compaction for long sessions
-- [ ] 13.2 Add "session notes" feature — AI can write persistent notes per session
-- [ ] 13.3 Add session context to system prompt (what was discussed, key decisions)
-- [ ] 13.4 Add tests for multi-turn memory
+- [x] 13.1 Add automatic context compaction for long sessions
+- [x] 13.2 Add "session notes" feature — AI can write persistent notes per session
+- [x] 13.3 Add session context to system prompt (what was discussed, key decisions)
+- [x] 13.4 Add tests for multi-turn memory
 
 ### Success Criteria
-- [ ] Long sessions (>20 turns) maintain context quality
-- [ ] AI can recall decisions from early in conversation
-- [ ] No context window overflow
+
+- [x] Long sessions (>20 turns) maintain context quality
+- [x] AI can recall decisions from early in conversation
+- [x] No context window overflow
 

@@ -33,7 +33,7 @@ import (
 // currentVersion is the active schema version. Increment this when
 // adding new migrations. The migrations slice must contain exactly
 // currentVersion entries, each idempotent (uses IF NOT EXISTS).
-const currentVersion = 2
+const currentVersion = 3
 
 // ── SQL constants ─────────────────────────────────────────────────
 
@@ -106,7 +106,28 @@ CREATE TRIGGER IF NOT EXISTS messages_fts_au AFTER UPDATE ON messages BEGIN
 END;
 `
 
-var migrations = []string{SchemaV1, SchemaV2}
+// SchemaV3 adds the session_notes table for persistent per-session notes
+// that the AI can read/write during a conversation. Notes survive across
+// compaction cycles and session resumes, providing multi-turn memory.
+const SchemaV3 = `
+-- Schema version 3: session_notes for multi-turn memory.
+
+CREATE TABLE IF NOT EXISTS session_notes (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id TEXT NOT NULL,
+    key TEXT NOT NULL DEFAULT '',
+    content TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE,
+    UNIQUE(session_id, key)
+);
+
+CREATE INDEX IF NOT EXISTS idx_session_notes_session
+ON session_notes(session_id, key);
+`
+
+var migrations = []string{SchemaV1, SchemaV2, SchemaV3}
 
 // ── Store ─────────────────────────────────────────────────────────
 
@@ -898,6 +919,52 @@ func parseToolCallLine(line string, lines []string, idx *int) *ToolCall {
 		}
 	}
 	return tc
+}
+
+// ── Notes ──────────────────────────────────────────────────────
+
+func (s *Store) SaveSessionNote(sessionID, key, content string) error {
+	now := time.Now().UTC().Format(time.RFC3339)
+	_, err := s.DB.Exec(`
+		INSERT INTO session_notes (session_id, key, content, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?)
+		ON CONFLICT(session_id, key) DO UPDATE SET
+			content = excluded.content,
+			updated_at = excluded.updated_at
+	`, sessionID, key, content, now, now)
+	return err
+}
+
+func (s *Store) GetSessionNotes(sessionID string) ([]*Note, error) {
+	rows, err := s.DB.Query(
+		`SELECT id, session_id, key, content, created_at, updated_at
+		 FROM session_notes WHERE session_id = ? ORDER BY key ASC`, sessionID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var notes []*Note
+	for rows.Next() {
+		var n Note
+		var createdAt, updatedAt string
+		if err := rows.Scan(&n.ID, &n.SessionID, &n.Key, &n.Content, &createdAt, &updatedAt); err != nil {
+			return nil, err
+		}
+		n.CreatedAt, _ = time.Parse(time.RFC3339, createdAt)
+		n.UpdatedAt, _ = time.Parse(time.RFC3339, updatedAt)
+		notes = append(notes, &n)
+	}
+	if notes == nil {
+		notes = []*Note{}
+	}
+	return notes, rows.Err()
+}
+
+func (s *Store) DeleteSessionNote(id int64) error {
+	_, err := s.DB.Exec(`DELETE FROM session_notes WHERE id = ?`, id)
+	return err
 }
 
 // migrate applies any pending schema migrations.

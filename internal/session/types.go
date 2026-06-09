@@ -46,9 +46,21 @@ type ExportedMessage struct {
 	ToolCalls []*ToolCall `json:"tool_calls,omitempty"`
 }
 
+// Note is a persistent key-value note attached to a session.
+// The AI writes notes to remember important facts across compaction
+// cycles and session resumes (multi-turn memory).
+type Note struct {
+	ID        int64     `json:"id"`
+	SessionID string    `json:"session_id"`
+	Key       string    `json:"key"`
+	Content   string    `json:"content"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
 // ExportedSession is the full session tree used for export/import.
 // It contains the session metadata and all messages with their tool calls.
 type ExportedSession struct {
-	Session  *Session          `json:"session"`
+	Session *Session `json:"session"`
 	Messages []*ExportedMessage `json:"messages"`
 }
